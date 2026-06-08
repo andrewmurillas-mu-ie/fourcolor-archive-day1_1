@@ -124,15 +124,22 @@ def _near_any(cx: int, cy: int, nodes: list[Node], threshold: int = PROXIMITY_PX
 
 
 # ---------------------------------------------------------------------------
-# Step 1 — Solid dot detection (distance transform peaks)
+# Step 1 — Solid dot detection (morphological erosion)
 # ---------------------------------------------------------------------------
 #
-# Solid dots sit at graph junctions where many thick edges converge, so their
-# blob contour merges with the edges and circularity/area tests fail. Instead,
-# we use the distance transform: each ink pixel's value = distance to nearest
-# background pixel. A solid dot centre is a local maximum with a high value
-# (it is far from any white pixel), whereas an edge interior has a low max
-# (thin lines are never far from background).
+# TODO: solid dot detection is incomplete and needs further work.
+# Several approaches were attempted and abandoned:
+#   - Hough circles: couldn't distinguish filled discs from hollow rings or
+#     face boundaries; all circles were being classified as open_circle.
+#   - Matched filter (circular convolution): dense triangulation means face
+#     interiors score as high as node centres — no clean threshold exists.
+#   - Distance transform peaks: max dist at 600 DPI is only ~10px, giving a
+#     gap of <1px between solid dot peaks and edge-midpoint peaks — unreliable.
+#   - Fat-ink components (threshold dist transform): blob circularity is ~0.08
+#     at junctions (star-shaped), so circularity filters reject real nodes.
+# Current approach (erosion r=8) works on some configurations but misses solid
+# dots in dense graphs where the morphological gap is too narrow. The HITL UI
+# is the designed correction path for missed/misclassified nodes.
 
 def detect_solid_dots(binary_inv: np.ndarray) -> list[Node]:
     """
@@ -190,9 +197,20 @@ def detect_open_circles(gray: np.ndarray, binary_inv: np.ndarray,
         cx, cy, r = int(cx), int(cy), int(r)
         if _near_any(cx, cy, existing):
             continue
-        if _fill_ratio(binary_inv, cx, cy, r) > OPEN_MAX_FILL:
-            continue  # too filled — not a hollow ring
-        nodes.append(Node(x=cx, y=cy, radius=r, shape="open_circle", degree=6))
+        # TODO: solid/open classification via fill ratio is unreliable.
+        # Hough finds circles at the outer boundary of nodes, so the detected
+        # centre can sit over white space between edges rather than over the ink
+        # core — especially for solid dots at dense junctions. Reducing
+        # sample_frac to 0.30 (from 0.70) helped avoid edge bleed but the
+        # thresholds (>0.60 = solid, <0.38 = open) are still fragile across
+        # configurations. A better approach may be to use the grayscale image
+        # directly (mean intensity at centre) rather than the binarised image.
+        fill = _fill_ratio(binary_inv, cx, cy, r, sample_frac=0.30)
+        if fill > 0.60:
+            nodes.append(Node(x=cx, y=cy, radius=r, shape="solid_dot", degree=5))
+        elif fill < OPEN_MAX_FILL:
+            nodes.append(Node(x=cx, y=cy, radius=r, shape="open_circle", degree=6))
+        # 0.38–0.60 is ambiguous (face annotation numerals etc.) — discard
 
     return nodes
 
