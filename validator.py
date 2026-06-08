@@ -38,6 +38,7 @@ class Validator:
         Returns:
             ValidationResult with is_valid=True iff E_total == 3V - r - 3.
         """
+        print(f"{self.__str__()}: Checking {V} vertices, {E_internal} internal, {E_attachment} attachment, {r} rings")
         E_total = E_internal + E_attachment
         E_expected = 3 * V - r - 3
         return ValidationResult(
