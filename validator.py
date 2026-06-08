@@ -16,21 +16,35 @@ class ValidationResult:
             f"expected 3*{self.V} - {self.r} - 3 = {self.E_expected}"
         )
 
+
 class Validator:
+    """Checks the Triangulated Disk Identity for Appel-Haken configurations.
+
+    Every fully triangulated disk satisfies E_total = 3V - r - 3, derived
+    from Euler's formula for planar graphs. Any extraction that violates it
+    must be rejected or sent to the HITL correction UI.
     """
-    Checks the Triangulated Disk Identity for Appel-Haken configurations:
 
-        E_total = 3V - r - 3
+    def check(self, V: int, E_internal: int, E_attachment: int, r: int) -> ValidationResult:
+        """Check whether a configuration satisfies the Triangulated Disk Identity.
 
-    Parameters (all integers):
-        V           -- total vertices in the configuration, including the r ring vertices
-        E_internal  -- edges strictly between non-ring vertices
-        E_attachment-- edges that involve at least one ring vertex (ring-to-ring and
-                       ring-to-interior edges both count here)
-        r           -- ring size (number of boundary vertices)
+        Args:
+            V: Total vertices in the configuration, including the r ring vertices.
+            E_internal: Edges strictly between non-ring vertices.
+            E_attachment: Edges involving at least one ring vertex (ring-to-ring
+                and ring-to-interior edges both count).
+            r: Ring size (number of boundary vertices).
 
-    Any fully triangulated disk must satisfy this identity (derived from Euler's
-    formula for planar graphs). Any extraction that violates it must be rejected
-    or sent to the HITL correction UI.
-    """
+        Returns:
+            ValidationResult with is_valid=True iff E_total == 3V - r - 3.
+        """
+        E_total = E_internal + E_attachment
+        E_expected = 3 * V - r - 3
+        return ValidationResult(
+            is_valid=(E_total == E_expected),
+            V=V,
+            r=r,
+            E_total=E_total,
+            E_expected=E_expected,
+        )
 
