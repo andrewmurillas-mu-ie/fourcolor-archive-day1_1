@@ -55,7 +55,9 @@ COLOURS = {
 HIT_RADIUS_PX  = 18   # pixel distance to count as "clicking on" a node
 EDGE_HIT_PX    = 10   # pixel distance to count as "clicking on" an edge
 LINE_PROBE_THRESH = 0.45   # fraction of sampled pixels that must be ink
-LINE_PROBE_SKIP  = 14      # pixels near each node centre to skip when probing
+# Skip is now computed per-pair from node radii (see _probe_edge); this
+# constant is kept only as a minimum floor.
+LINE_PROBE_SKIP_MIN = 6
 
 _validator = Validator()
 
@@ -68,11 +70,13 @@ def _probe_edge(binary_inv: np.ndarray, n1: Node, n2: Node) -> bool:
     """Return True if enough dark pixels lie along the line between n1 and n2."""
     x1, y1, x2, y2 = n1.x, n1.y, n2.x, n2.y
     length = float(np.hypot(x2 - x1, y2 - y1))
-    if length < 2 * LINE_PROBE_SKIP + 4:
+    # Skip at least the node's own radius so we don't sample through the node disc.
+    skip = max(LINE_PROBE_SKIP_MIN, n1.radius, n2.radius)
+    if length < 2 * skip + 4:
         return False
 
     t = np.linspace(0.0, 1.0, int(length) + 1)
-    skip_frac = LINE_PROBE_SKIP / length
+    skip_frac = skip / length
     valid = (t > skip_frac) & (t < 1.0 - skip_frac)
 
     xs = np.clip((x1 + t * (x2 - x1)).astype(int), 0, binary_inv.shape[1] - 1)

@@ -36,15 +36,16 @@ LABEL_STRIP_FRAC = 0.18
 # Adaptive threshold block size (should be odd; ~5% of crop width at 600 DPI)
 BINARISE_BLOCK = 31
 
-# --- Solid dot detection via morphological erosion ---
-# At 600 DPI: edges ~8-10px wide, solid dot radius ~10px.
-# Eroding with r=8 strips edges (leaves area<40) but solid dot cores survive (area>50).
-SOLID_ERODE_R = 8
-SOLID_CORE_MIN_AREA = 50   # px² after erosion — anything smaller is an edge fragment
-SOLID_CORE_MAX_AREA = 800  # px² — cap to avoid merged regions
+# --- Solid dot detection via distance-transform local maxima ---
+# At 600 DPI: edge half-width ~4–6 px (dist peak ~4–6), solid dot radius ~10–25 px
+# (dist peak ~10–25).  Threshold at 10 px rejects thick-edge midpoints (dist ~8–9)
+# while keeping genuine solid dots.  Fill ratio 0.65 further guards against
+# elongated junction blobs that survive the distance threshold.
+SOLID_MIN_DIST_PX = 10.0   # minimum dist-transform value to qualify as a node centre
+SOLID_FILL_MIN    = 0.65   # fill ratio within 0.5*r must exceed this
 
 # --- Open circle (Hough ring) detection ---
-# At 600 DPI, open circle rings have radius ~12–20px
+# At 600 DPI, open circle rings have radius ~12–20px.
 HOUGH_MIN_RADIUS = 10
 HOUGH_MAX_RADIUS = 22
 HOUGH_MIN_DIST = 28
@@ -123,49 +124,76 @@ def _near_any(cx: int, cy: int, nodes: list[Node], threshold: int = PROXIMITY_PX
     return any((cx - n.x) ** 2 + (cy - n.y) ** 2 < threshold ** 2 for n in nodes)
 
 
+def _radial_ink_count(binary_inv: np.ndarray, cx: int, cy: int, r: int,
+                      n_angles: int = 8, factor: float = 1.5) -> int:
+    """Count how many of n_angles directions have ink at distance factor*r.
+
+    Real nodes have edges attached, so several outward directions are ink.
+    Annotation blobs sitting in an empty face have 0 ink at that distance.
+    """
+    sample_r = r * factor
+    angles = np.linspace(0.0, 2 * np.pi, n_angles, endpoint=False)
+    xs = np.clip((cx + sample_r * np.cos(angles)).astype(int), 0, binary_inv.shape[1] - 1)
+    ys = np.clip((cy + sample_r * np.sin(angles)).astype(int), 0, binary_inv.shape[0] - 1)
+    return int((binary_inv[ys, xs] > 128).sum())
+
+
 # ---------------------------------------------------------------------------
-# Step 1 — Solid dot detection (morphological erosion)
+# Step 1 — Solid dot detection (distance-transform local maxima)
 # ---------------------------------------------------------------------------
-#
-# TODO: solid dot detection is incomplete and needs further work.
-# Several approaches were attempted and abandoned:
-#   - Hough circles: couldn't distinguish filled discs from hollow rings or
-#     face boundaries; all circles were being classified as open_circle.
-#   - Matched filter (circular convolution): dense triangulation means face
-#     interiors score as high as node centres — no clean threshold exists.
-#   - Distance transform peaks: max dist at 600 DPI is only ~10px, giving a
-#     gap of <1px between solid dot peaks and edge-midpoint peaks — unreliable.
-#   - Fat-ink components (threshold dist transform): blob circularity is ~0.08
-#     at junctions (star-shaped), so circularity filters reject real nodes.
-# Current approach (erosion r=8) works on some configurations but misses solid
-# dots in dense graphs where the morphological gap is too narrow. The HITL UI
-# is the designed correction path for missed/misclassified nodes.
 
 def detect_solid_dots(binary_inv: np.ndarray) -> list[Node]:
     """
-    Erode with SOLID_ERODE_R to strip thin edges; solid dot cores survive.
-    At 600 DPI: edge peaks ≤ ~9px, solid dot peaks ~10px — eroding at r=8
-    removes edge stripes (residual area <40px²) while solid dot cores remain
-    (area >50px²). Use the dist-transform peak of each core as the true centre.
+    Each foreground pixel's distance-transform value = distance to the nearest
+    background pixel.  At the centre of a solid dot (~10–25 px radius at
+    600 DPI) this value is ~10–25 px; at an edge midpoint (~4–6 px half-width)
+    it is ~4–6 px.  Thresholding at SOLID_MIN_DIST_PX=8 cleanly separates
+    them without a fragile erosion radius or area cap.
     """
-    erode_k = cv2.getStructuringElement(
-        cv2.MORPH_ELLIPSE, (SOLID_ERODE_R * 2 + 1,) * 2)
-    eroded = cv2.erode(binary_inv, erode_k, iterations=1)
-    dist = cv2.distanceTransform(binary_inv, cv2.DIST_L2, 5)
+    # Close small ink gaps (≤9 px) so the narrow white spaces between edge arms
+    # at dense hubs don't suppress the hub's dist-transform peak.  The original
+    # binary_inv is kept for fill-ratio classification so we don't inflate scores
+    # on non-node regions that closing artificially fills.
+    close_k = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (9, 9))
+    closed = cv2.morphologyEx(binary_inv, cv2.MORPH_CLOSE, close_k)
+    dist = cv2.distanceTransform(closed, cv2.DIST_L2, 5)
 
-    num_labels, labels, stats, centroids = cv2.connectedComponentsWithStats(eroded)
+    # Non-maximum suppression: keep pixels whose dist value is the local max
+    # within a window of radius PROXIMITY_PX (one peak per node spacing).
+    ksize = PROXIMITY_PX * 2 + 1
+    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (ksize, ksize))
+    local_max = cv2.dilate(dist, kernel)
+    peak_mask = (
+        (dist >= local_max - 0.5) & (dist >= SOLID_MIN_DIST_PX)
+    ).astype(np.uint8)
+
+    # Connected components to merge any adjacent equal-value peak pixels.
+    num, labels, _, _ = cv2.connectedComponentsWithStats(peak_mask)
+
     nodes: list[Node] = []
-
-    for label in range(1, num_labels):
-        area = stats[label, cv2.CC_STAT_AREA]
-        if not (SOLID_CORE_MIN_AREA <= area <= SOLID_CORE_MAX_AREA):
-            continue
-        comp_mask = labels == label
+    for lbl in range(1, num):
+        comp_mask = labels == lbl
         peak_val = float(dist[comp_mask].max())
         peak_ys, peak_xs = np.where(comp_mask & (dist >= peak_val - 0.5))
         cx = int(peak_xs.mean())
         cy = int(peak_ys.mean())
         r = max(1, int(peak_val))
+
+        # Sample close to the centre (0.3r) so edge arms radiating from large
+        # hubs don't reduce the fill ratio into the rejection zone.
+        fill = _fill_ratio(binary_inv, cx, cy, r, sample_frac=0.3)
+        if fill < SOLID_FILL_MIN:
+            continue
+
+        # Annotation blobs (boosted by closing) sit in empty faces — they have
+        # no ink in any outward direction at 1.5r.  Real nodes have ≥2 attached
+        # edges visible at that distance.
+        if _radial_ink_count(binary_inv, cx, cy, r) < 2:
+            continue
+
+        if _near_any(cx, cy, nodes):
+            continue
+
         nodes.append(Node(x=cx, y=cy, radius=r, shape="solid_dot", degree=5))
 
     return nodes
