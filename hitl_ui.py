@@ -32,8 +32,9 @@ from pathlib import Path
 
 import cv2
 import matplotlib.pyplot as plt
-import matplotlib.patches as mpatches
+import matplotlib.patches as patches
 import numpy as np
+from typing import Any
 from mpl_toolkits.axes_grid1.mpl_axes import Axes
 
 from node_detector import Node, detect_nodes, load_binary, DEGREE_MAP
@@ -141,22 +142,22 @@ class HITLEditor:
         self.fig.patch.set_facecolor("#1e1e2e")
 
         # Image axes (left 68%)
-        self.ax: Axes = self.fig.add_axes([0.01, 0.08, 0.66, 0.90])
+        self.ax: Axes = self.fig.add_axes((0.01, 0.08, 0.66, 0.90))
         self.ax.set_facecolor("#1e1e2e")
         self.ax.axis("off")
 
         # Info panel (right 30%)
-        self.info_ax = self.fig.add_axes([0.69, 0.08, 0.30, 0.90])
+        self.info_ax = self.fig.add_axes((0.69, 0.08, 0.30, 0.90))
         self.info_ax.set_facecolor("#2a2a3e")
         self.info_ax.axis("off")
 
         # Button bar (bottom strip)
         from matplotlib.widgets import Button
 
-        ax_add  = self.fig.add_axes([0.02,  0.01, 0.18, 0.055])
-        ax_save = self.fig.add_axes([0.22,  0.01, 0.18, 0.055])
-        ax_next = self.fig.add_axes([0.44,  0.01, 0.10, 0.055])
-        ax_prev = self.fig.add_axes([0.56,  0.01, 0.10, 0.055])
+        ax_add  = self.fig.add_axes((0.02,  0.01, 0.18, 0.055))
+        ax_save = self.fig.add_axes((0.22,  0.01, 0.18, 0.055))
+        ax_next = self.fig.add_axes((0.44,  0.01, 0.10, 0.055))
+        ax_prev = self.fig.add_axes((0.56,  0.01, 0.10, 0.055))
 
         self.btn_add  = Button(ax_add,  "Add Edge [A]",  color="#3a3a5c", hovercolor="#5555aa")
         self.btn_save = Button(ax_save, "Save JSON [S]", color="#2d4a2d", hovercolor="#3a6b3a")
@@ -201,9 +202,9 @@ class HITLEditor:
             # Highlight first-selected node in add-edge mode
             lw = 3.5 if idx == self.edge_first else 2.0
             ring_r = n.radius + 5
-            circle = mpatches.Circle((n.x, n.y), ring_r,
-                                     edgecolor=c, facecolor="none",
-                                     linewidth=lw, zorder=3)
+            circle = patches.Circle((n.x, n.y), ring_r,
+                                    edgecolor=c, facecolor="none",
+                                    linewidth=lw, zorder=3)
             self.ax.add_patch(circle)
             self.ax.text(n.x, n.y - ring_r - 5, str(n.degree),
                          color=c, fontsize=7, ha="center", va="bottom",
@@ -321,7 +322,7 @@ class HITLEditor:
 
     # ── Event handlers ───────────────────────────────────────────────────────
 
-    def _on_click(self, event):
+    def _on_click(self, event: Any) -> None:
         if event.inaxes is not self.ax:
             return
         if event.xdata is None or event.ydata is None:
@@ -332,19 +333,20 @@ class HITLEditor:
 
         if self.mode == "add_edge":
             idx = self._node_at(x, y)
-            if idx is None:
-                return
-            if self.edge_first is None:
-                self.edge_first = idx
-            elif idx != self.edge_first:
-                e = (min(self.edge_first, idx), max(self.edge_first, idx))
-                if e in self.edges:
-                    self.edges.discard(e)
-                else:
-                    self.edges.add(e)
-                self.edge_first = None
-                self.mode = "normal"
-            self.redraw()
+            if idx is not None:
+                node_idx: int = idx
+                first = self.edge_first
+                if first is None:
+                    self.edge_first = node_idx
+                elif node_idx != first:
+                    e = (min(first, node_idx), max(first, node_idx))
+                    if e in self.edges:
+                        self.edges.discard(e)
+                    else:
+                        self.edges.add(e)
+                    self.edge_first = None
+                    self.mode = "normal"
+                self.redraw()
             return
 
         # Normal mode
@@ -368,7 +370,7 @@ class HITLEditor:
         self.nodes.append(new_node)
         self.redraw()
 
-    def _on_key(self, event):
+    def _on_key(self, event: Any) -> None:
         k = event.key
         if k == "a":
             self._toggle_add_edge()
