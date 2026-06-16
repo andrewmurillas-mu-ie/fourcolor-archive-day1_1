@@ -28,13 +28,13 @@ Usage
 import argparse
 import json
 import sys
-from dataclasses import asdict
 from pathlib import Path
 
 import cv2
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
 import numpy as np
+from mpl_toolkits.axes_grid1.mpl_axes import Axes
 
 from node_detector import Node, detect_nodes, load_binary, DEGREE_MAP
 from validator import Validator
@@ -141,7 +141,7 @@ class HITLEditor:
         self.fig.patch.set_facecolor("#1e1e2e")
 
         # Image axes (left 68%)
-        self.ax = self.fig.add_axes([0.01, 0.08, 0.66, 0.90])
+        self.ax: Axes = self.fig.add_axes([0.01, 0.08, 0.66, 0.90])
         self.ax.set_facecolor("#1e1e2e")
         self.ax.axis("off")
 
