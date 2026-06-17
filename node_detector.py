@@ -121,7 +121,7 @@ def _fill_ratio(binary_inv: np.ndarray, cx: int, cy: int, r: int,
 
 
 def _near_any(cx: int, cy: int, nodes: list[Node], threshold: int = PROXIMITY_PX) -> bool:
-    return any((cx - n.x) ** 2 + (cy - n.y) ** 2 < threshold ** 2 for n in nodes)
+    return any((cx - node.x) ** 2 + (cy - node.y) ** 2 < threshold ** 2 for node in nodes)
 
 
 def _radial_ink_count(binary_inv: np.ndarray, cx: int, cy: int, r: int,
@@ -315,10 +315,10 @@ def draw_nodes(image_path: str, nodes: list[Node], out_path: str | None = None) 
     img = cv2.imread(image_path)
     if img is None:
         raise FileNotFoundError(f"Cannot read image: {image_path}")
-    for n in nodes:
-        colour = COLOURS[n.shape]
-        cv2.circle(img, (n.x, n.y), n.radius + 4, colour, 2)
-        cv2.putText(img, str(n.degree), (n.x - 6, n.y - n.radius - 6),
+    for node in nodes:
+        colour = COLOURS[node.shape]
+        cv2.circle(img, (node.x, node.y), node.radius + 4, colour, 2)
+        cv2.putText(img, str(node.degree), (node.x - 6, node.y - node.radius - 6),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.45, colour, 1, cv2.LINE_AA)
     if out_path:
         cv2.imwrite(out_path, img)
@@ -329,7 +329,7 @@ def draw_nodes(image_path: str, nodes: list[Node], out_path: str | None = None) 
 # CLI
 # ---------------------------------------------------------------------------
 
-if __name__ == "__main__":
+def main() -> None:
     parser = argparse.ArgumentParser(description="Phase 2: detect nodes in a config crop")
     parser.add_argument("image", help="Path to crop PNG")
     parser.add_argument("--debug", action="store_true", help="Save annotated image alongside input")
@@ -340,11 +340,15 @@ if __name__ == "__main__":
     print(f"\n{Path(args.image).name}  —  {len(nodes)} node(s) detected")
     print(f"  {'shape':<14} {'deg':>4}  {'(x, y)':>14}  {'r':>4}")
     print(f"  {'-'*14} {'----':>4}  {'------':>14}  {'--':>4}")
-    for n in nodes:
-        print(f"  {n.shape:<14} {n.degree:>4}  ({n.x:>5}, {n.y:>5})  {n.radius:>4}")
+    for node in nodes:
+        print(f"  {node.shape:<14} {node.degree:>4}  ({node.x:>5}, {node.y:>5})  {node.radius:>4}")
 
     if args.debug:
         p = Path(args.image)
         out = str(p.parent / (p.stem + "_nodes.png"))
         draw_nodes(args.image, nodes, out)
         print(f"\nDebug image saved to {out}")
+
+
+if __name__ == "__main__":
+    main()
