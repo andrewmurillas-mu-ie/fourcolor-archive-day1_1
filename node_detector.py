@@ -313,6 +313,8 @@ COLOURS = {
 
 def draw_nodes(image_path: str, nodes: list[Node], out_path: str | None = None) -> np.ndarray:
     img = cv2.imread(image_path)
+    if img is None:
+        raise FileNotFoundError(f"Cannot read image: {image_path}")
     for n in nodes:
         colour = COLOURS[n.shape]
         cv2.circle(img, (n.x, n.y), n.radius + 4, colour, 2)
