@@ -106,15 +106,15 @@ Build the **D-Reducibility Engine**:
 
 ## Technical Stack
 
-| Layer             | Tools                                      |
-|-------------------|--------------------------------------------|
-| Core language     | Python 3.x                                 |
-| Computer vision   | OpenCV (`cv2`), NumPy                      |
-| Graph logic       | NetworkX, NumPy                            |
-| UI (HITL)         | matplotlib or Tkinter                      |
-| Validation        | Custom `Validator` class (Euler identity)  |
-| Data format       | JSON (canonical configuration schema)      |
-| Performance layer | C++, Rust, or Cython (Gold/Platinum only)  |
+| Layer             | Tools                                         |
+|-------------------|-----------------------------------------------|
+| Core language     | Python 3.x                                    |
+| Computer vision   | OpenCV (`cv2`), NumPy                         |
+| Graph logic       | NetworkX, NumPy                               |
+| UI (HITL)         | matplotlib or Tkinter                         |
+| Validation        | Custom `Validator` class (Euler identity)     |
+| Data format       | JSON (canonical configuration schema)         |
+| Performance layer | C++, Rust, or Cython (Gold/Platinum only)     |
 | Formal modelling  | Alloy (planar graph model, under exploration) |
 
 ---
@@ -232,7 +232,7 @@ you a regression test for every future extraction.
 
 ## Key Contacts
 
-| Person       | Role       | Email                    |
-|--------------|------------|--------------------------|
-| Dr. Kevin Casey | Supervisor | Kevin.Casey@mu.ie     |
-| Andrés Murillas | Student  | ANDRES.MURILLAS.2025@mumail.ie |
+| Person          | Role       | Email                          |
+|-----------------|------------|--------------------------------|
+| Dr. Kevin Casey | Supervisor | Kevin.Casey@mu.ie              |
+| Andrés Murillas | Student    | ANDRES.MURILLAS.2025@mumail.ie |
