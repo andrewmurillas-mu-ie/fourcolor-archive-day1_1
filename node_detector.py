@@ -50,7 +50,8 @@ HOUGH_MIN_RADIUS = 10
 HOUGH_MAX_RADIUS = 22
 HOUGH_MIN_DIST = 28
 HOUGH_THRESHOLD = 18
-OPEN_MAX_FILL = 0.38           # interior must be mostly white
+OPEN_MIN_CENTRE_INTENSITY = 160  # mean grayscale in centre must exceed this (0=black, 255=white)
+OPEN_MIN_RING_INK = 0.45         # fraction of circumference at radius r that must be ink
 
 # --- Square / triangle (polygon) detection ---
 POLY_MIN_AREA = 400
@@ -122,6 +123,31 @@ def _fill_ratio(binary_inv: np.ndarray, cx: int, cy: int, r: int,
 
 def _near_any(cx: int, cy: int, nodes: list[Node], threshold: int = PROXIMITY_PX) -> bool:
     return any((cx - node.x) ** 2 + (cy - node.y) ** 2 < threshold ** 2 for node in nodes)
+
+
+def _mean_intensity(gray: np.ndarray, cx: int, cy: int, r: int,
+                    sample_frac: float = 0.4) -> float:
+    """Mean grayscale value within sample_frac*r of (cx, cy). High = white/hollow centre."""
+    h, w = gray.shape
+    ys, xs = np.ogrid[:h, :w]
+    mask = (xs - cx) ** 2 + (ys - cy) ** 2 <= (r * sample_frac) ** 2
+    pixels = gray[mask]
+    return float(pixels.mean()) if pixels.size else 255.0
+
+
+def _ring_ink_density(binary_inv: np.ndarray, cx: int, cy: int, r: int,
+                      n_angles: int = 24) -> float:
+    """Fraction of circumference points at radius r that are ink.
+
+    Real open circle nodes have their ring boundary as actual ink, so most
+    sampled points hit the ring.  Hough false positives fitted to the white
+    gap between spokes at a hub have white space between spoke directions,
+    giving a low fraction.
+    """
+    angles = np.linspace(0.0, 2 * np.pi, n_angles, endpoint=False)
+    xs = np.clip((cx + r * np.cos(angles)).astype(int), 0, binary_inv.shape[1] - 1)
+    ys = np.clip((cy + r * np.sin(angles)).astype(int), 0, binary_inv.shape[0] - 1)
+    return float((binary_inv[ys, xs] > 128).sum()) / n_angles
 
 
 def _radial_ink_count(binary_inv: np.ndarray, cx: int, cy: int, r: int,
@@ -225,20 +251,13 @@ def detect_open_circles(gray: np.ndarray, binary_inv: np.ndarray,
         cx, cy, r = int(cx), int(cy), int(r)
         if _near_any(cx, cy, existing):
             continue
-        # TODO: solid/open classification via fill ratio is unreliable.
-        # Hough finds circles at the outer boundary of nodes, so the detected
-        # centre can sit over white space between edges rather than over the ink
-        # core — especially for solid dots at dense junctions. Reducing
-        # sample_frac to 0.30 (from 0.70) helped avoid edge bleed but the
-        # thresholds (>0.60 = solid, <0.38 = open) are still fragile across
-        # configurations. A better approach may be to use the grayscale image
-        # directly (mean intensity at centre) rather than the binarised image.
-        fill = _fill_ratio(binary_inv, cx, cy, r, sample_frac=0.30)
-        if fill > 0.60:
-            nodes.append(Node(x=cx, y=cy, radius=r, shape="solid_dot", degree=5))
-        elif fill < OPEN_MAX_FILL:
-            nodes.append(Node(x=cx, y=cy, radius=r, shape="open_circle", degree=6))
-        # 0.38–0.60 is ambiguous (face annotation numerals etc.) — discard
+        if _mean_intensity(gray, cx, cy, r) < OPEN_MIN_CENTRE_INTENSITY:
+            continue
+        if _radial_ink_count(binary_inv, cx, cy, r) < 2:
+            continue
+        if _ring_ink_density(binary_inv, cx, cy, r) < OPEN_MIN_RING_INK:
+            continue
+        nodes.append(Node(x=cx, y=cy, radius=r, shape="open_circle", degree=6))
 
     return nodes
 
