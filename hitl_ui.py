@@ -20,9 +20,11 @@ Controls
 
 Usage
 -----
-  python hitl_ui.py crops600/page043_cell002.png
-  python hitl_ui.py crops600/          # browse all PNGs in a directory
-  python hitl_ui.py crops600/ --out annotations/
+  python hitl_ui.py crops_part2/page014_cell005.png
+  python hitl_ui.py crops_part2/                         # browse all PNGs
+  python hitl_ui.py crops_part2/ --detections detections_part2.json
+  python hitl_ui.py crops_part2/ --detections detections_part2.json --skip-empty
+  python hitl_ui.py crops_part2/ --detections detections_part2.json --out annotations/
 """
 
 import argparse
@@ -105,7 +107,8 @@ def probe_all_edges(binary_inv: np.ndarray, nodes: list[Node]) -> set[tuple[int,
 # ──────────────────────────────────────────────────────────────────────────────
 
 class HITLEditor:
-    def __init__(self, image_path: str, out_dir: str = "annotations"):
+    def __init__(self, image_path: str, out_dir: str = "annotations",
+                 preloaded_nodes: list[Node] | None = None):
         self.image_path = Path(image_path)
         self.out_dir = Path(out_dir)
         self.out_dir.mkdir(parents=True, exist_ok=True)
@@ -120,7 +123,10 @@ class HITLEditor:
         _, self.binary_inv = load_binary(str(self.image_path))
 
         # ── Graph state ─────────────────────────────────────────────────────
-        self.nodes: list[Node] = detect_nodes(str(self.image_path))
+        self.nodes: list[Node] = (
+            preloaded_nodes if preloaded_nodes is not None
+            else detect_nodes(str(self.image_path))
+        )
         self.edges: set[tuple[int, int]] = probe_all_edges(self.binary_inv, self.nodes)
         self.r: int = 5          # ring size — user adjustable
         self.e_attach: int = 0   # E_attachment count — user adjustable
@@ -501,13 +507,32 @@ def main():
     parser = argparse.ArgumentParser(description="HITL correction UI for Appel-Haken configurations")
     parser.add_argument("path", help="Path to a single crop PNG or a directory of PNGs")
     parser.add_argument("--out", default="annotations", help="Output directory for JSON files")
+    parser.add_argument("--detections", type=Path, default=None,
+                        help="detections_part2.json from batch_detect.py — pre-populates nodes")
+    parser.add_argument("--skip-empty", action="store_true",
+                        help="Skip crops with zero detected nodes (only with --detections)")
     args = parser.parse_args()
+
+    # Load pre-computed detections if provided
+    detections: dict[str, list[Node]] = {}
+    detection_order: list[str] = []   # crop filenames in JSON order
+    if args.detections:
+        raw = json.loads(args.detections.read_text())
+        for entry in raw:
+            if args.skip_empty and entry["node_count"] == 0:
+                continue
+            nodes = [Node(**n) for n in entry["nodes"]]
+            detections[entry["crop"]] = nodes
+            detection_order.append(entry["crop"])
 
     p = Path(args.path)
     if p.is_dir():
-        images = sorted(p.glob("*_cell*.png"))
-        # Exclude debug and node annotation images
-        images = [i for i in images if "_nodes" not in i.name and "_debug" not in i.name]
+        if detection_order:
+            # Use JSON order; only include crops that exist on disk
+            images = [p / name for name in detection_order if (p / name).exists()]
+        else:
+            images = sorted(p.glob("*_cell*.png"))
+            images = [i for i in images if "_nodes" not in i.name and "_debug" not in i.name]
     elif p.is_file():
         images = [p]
     else:
@@ -518,7 +543,8 @@ def main():
 
     idx = 0
     while 0 <= idx < len(images):
-        editor = HITLEditor(str(images[idx]), out_dir=args.out)
+        preloaded = detections.get(images[idx].name) if detections else None
+        editor = HITLEditor(str(images[idx]), out_dir=args.out, preloaded_nodes=preloaded)
         direction = getattr(editor, "_next_direction", 0)
         idx += direction if direction != 0 else len(images)  # 0 = window closed normally → stop
 

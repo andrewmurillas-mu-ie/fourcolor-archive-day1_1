@@ -33,16 +33,21 @@ import numpy as np
 # Fraction of image height stripped from bottom to remove "CTL #N" label
 LABEL_STRIP_FRAC = 0.18
 
-# Adaptive threshold block size (should be odd; ~5% of crop width at 600 DPI)
-BINARISE_BLOCK = 31
+# Adaptive threshold block sizes (should be odd)
+BINARISE_BLOCK       = 31   # used for edge/open-circle features (fine detail)
+SOLID_BINARISE_BLOCK = 61   # used for solid dot detection only — larger window
+                             # prevents adaptive threshold from hollowing out large
+                             # solid discs (block=31 makes their centres appear white)
 
 # --- Solid dot detection via distance-transform local maxima ---
 # At 600 DPI: edge half-width ~4–6 px (dist peak ~4–6), solid dot radius ~10–25 px
 # (dist peak ~10–25).  Threshold at 10 px rejects thick-edge midpoints (dist ~8–9)
 # while keeping genuine solid dots.  Fill ratio 0.65 further guards against
 # elongated junction blobs that survive the distance threshold.
-SOLID_MIN_DIST_PX = 10.0   # minimum dist-transform value to qualify as a node centre
-SOLID_FILL_MIN    = 0.65   # fill ratio within 0.5*r must exceed this
+SOLID_MIN_DIST_PX  = 10.0   # minimum dist-transform value to qualify as a node centre
+SOLID_FILL_MIN     = 0.65   # fill ratio within 0.3*r must exceed this
+SOLID_LARGE_RADIUS = 14     # nodes with r >= this only need 1 outward ink direction
+                             # (both edge arms may fall in a narrow angular range)
 
 # --- Open circle (Hough ring) detection ---
 # At 600 DPI, open circle rings have radius ~12–20px.
@@ -86,23 +91,28 @@ class Node:
 # Image loading
 # ---------------------------------------------------------------------------
 
-def load_binary(image_path: str) -> tuple[np.ndarray, np.ndarray]:
-    """Return (gray, binary_inv) with the bottom label strip removed."""
+def _load_denoised(image_path: str) -> np.ndarray:
+    """Load, strip label row, and median-denoise. Returns denoised gray."""
     gray = cv2.imread(image_path, cv2.IMREAD_GRAYSCALE)
     if gray is None:
         raise FileNotFoundError(f"Cannot read image: {image_path}")
-
     h = gray.shape[0]
-    gray = gray[:h - int(h * LABEL_STRIP_FRAC), :]
+    return cv2.medianBlur(gray[:h - int(h * LABEL_STRIP_FRAC), :], 3)
 
-    denoised = cv2.medianBlur(gray, 3)
-    binary = cv2.adaptiveThreshold(
+
+def _binarise(denoised: np.ndarray, block_size: int) -> np.ndarray:
+    return cv2.adaptiveThreshold(
         denoised, 255,
         cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
         cv2.THRESH_BINARY_INV,
-        blockSize=BINARISE_BLOCK, C=8,
+        blockSize=block_size, C=8,
     )
-    return gray, binary
+
+
+def load_binary(image_path: str) -> tuple[np.ndarray, np.ndarray]:
+    """Return (denoised_gray, binary_inv) with the bottom label strip removed."""
+    denoised = _load_denoised(image_path)
+    return denoised, _binarise(denoised, BINARISE_BLOCK)
 
 
 # ---------------------------------------------------------------------------
@@ -168,24 +178,23 @@ def _radial_ink_count(binary_inv: np.ndarray, cx: int, cy: int, r: int,
 # Step 1 — Solid dot detection (distance-transform local maxima)
 # ---------------------------------------------------------------------------
 
-def detect_solid_dots(binary_inv: np.ndarray) -> list[Node]:
+def detect_solid_dots(binary_inv: np.ndarray,
+                       binary_inv_solid: np.ndarray) -> list[Node]:
     """
     Each foreground pixel's distance-transform value = distance to the nearest
     background pixel.  At the centre of a solid dot (~10–25 px radius at
     600 DPI) this value is ~10–25 px; at an edge midpoint (~4–6 px half-width)
-    it is ~4–6 px.  Thresholding at SOLID_MIN_DIST_PX=8 cleanly separates
-    them without a fragile erosion radius or area cap.
+    it is ~4–6 px.
+
+    binary_inv_solid (block=61) is used for the distance transform and fill
+    check — it correctly fills large solid discs that block=31 hollows out.
+    binary_inv (block=31) is used for the radial ink count — it has better
+    resolution for thin edge lines.
     """
-    # Close small ink gaps (≤9 px) so the narrow white spaces between edge arms
-    # at dense hubs don't suppress the hub's dist-transform peak.  The original
-    # binary_inv is kept for fill-ratio classification so we don't inflate scores
-    # on non-node regions that closing artificially fills.
     close_k = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (9, 9))
-    closed = cv2.morphologyEx(binary_inv, cv2.MORPH_CLOSE, close_k)
+    closed = cv2.morphologyEx(binary_inv_solid, cv2.MORPH_CLOSE, close_k)
     dist = cv2.distanceTransform(closed, cv2.DIST_L2, 5)
 
-    # Non-maximum suppression: keep pixels whose dist value is the local max
-    # within a window of radius PROXIMITY_PX (one peak per node spacing).
     ksize = PROXIMITY_PX * 2 + 1
     kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (ksize, ksize))
     local_max = cv2.dilate(dist, kernel)
@@ -193,7 +202,6 @@ def detect_solid_dots(binary_inv: np.ndarray) -> list[Node]:
         (dist >= local_max - 0.5) & (dist >= SOLID_MIN_DIST_PX)
     ).astype(np.uint8)
 
-    # Connected components to merge any adjacent equal-value peak pixels.
     num, labels, _, _ = cv2.connectedComponentsWithStats(peak_mask)
 
     nodes: list[Node] = []
@@ -205,16 +213,16 @@ def detect_solid_dots(binary_inv: np.ndarray) -> list[Node]:
         cy = int(peak_ys.mean())
         r = max(1, int(peak_val))
 
-        # Sample close to the centre (0.3r) so edge arms radiating from large
-        # hubs don't reduce the fill ratio into the rejection zone.
-        fill = _fill_ratio(binary_inv, cx, cy, r, sample_frac=0.3)
+        fill = _fill_ratio(binary_inv_solid, cx, cy, r, sample_frac=0.3)
         if fill < SOLID_FILL_MIN:
             continue
 
-        # Annotation blobs (boosted by closing) sit in empty faces — they have
-        # no ink in any outward direction at 1.5r.  Real nodes have ≥2 attached
-        # edges visible at that distance.
-        if _radial_ink_count(binary_inv, cx, cy, r) < 2:
+        # 16 angles give better angular coverage than 8 for nodes with edges
+        # bunched in a narrow arc.  Large nodes (r >= SOLID_LARGE_RADIUS) only
+        # need 1 hit — both attached edges may point in similar directions.
+        radial = _radial_ink_count(binary_inv, cx, cy, r, n_angles=16)
+        min_radial = 1 if r >= SOLID_LARGE_RADIUS else 2
+        if radial < min_radial:
             continue
 
         if _near_any(cx, cy, nodes):
@@ -312,7 +320,8 @@ def detect_polygon_nodes(binary_inv: np.ndarray, existing: list[Node]) -> list[N
 
 def detect_nodes(image_path: str) -> list[Node]:
     gray, binary_inv = load_binary(image_path)
-    solid_dots = detect_solid_dots(binary_inv)
+    binary_inv_solid = _binarise(gray, SOLID_BINARISE_BLOCK)
+    solid_dots = detect_solid_dots(binary_inv, binary_inv_solid)
     open_circles = detect_open_circles(gray, binary_inv, solid_dots)
     polygons = detect_polygon_nodes(binary_inv, solid_dots + open_circles)
     return solid_dots + open_circles + polygons
