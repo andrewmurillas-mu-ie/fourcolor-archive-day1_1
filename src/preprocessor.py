@@ -37,6 +37,7 @@ def pdf_page_to_gray(pdf_path: str, page_index: int) -> np.ndarray:
     try:
         import fitz  # PyMuPDF
     except ImportError:
+        fitz = None
         sys.exit("PyMuPDF not found. Install it with:  pip install pymupdf")
 
     doc = fitz.open(pdf_path)
@@ -84,7 +85,7 @@ def find_config_boxes(binary: np.ndarray) -> list[tuple[int, int, int, int]]:
     contours, _ = cv2.findContours(dilated, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
     boxes = []
-    h_page, w_page = binary.shape
+    #h_page, w_page = binary.shape
     for cnt in contours:
         area = cv2.contourArea(cnt)
         if not (MIN_CELL_AREA < area < MAX_CELL_AREA):
