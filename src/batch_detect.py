@@ -14,7 +14,7 @@ import time
 from dataclasses import asdict
 from pathlib import Path
 
-from node_detector import detect_nodes
+from src.node_detector import detect_nodes
 
 CROPS_DIR = Path("crops_part2")
 DEFAULT_OUT = Path("detections_part2.json")
