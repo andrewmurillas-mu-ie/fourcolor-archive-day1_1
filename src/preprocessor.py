@@ -75,16 +75,20 @@ def binarise(gray: np.ndarray) -> np.ndarray:
 # Step 3 — Detect configuration bounding boxes
 # ---------------------------------------------------------------------------
 
+# TODO: refine bounding box boundarys
 def find_config_boxes(binary: np.ndarray) -> list[tuple[int, int, int, int]]:
     """Return (x, y, w, h) bounding boxes for each detected configuration cell."""
 
-    # Dilate to merge nearby strokes that belong to the same diagram
+    # **dilate** to merge nearby strokes that belong to the same diagram
     kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (20, 20))
     dilated = cv2.dilate(binary, kernel, iterations=2)
 
+    # find contours, discarding noise
     contours, _ = cv2.findContours(dilated, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
     boxes = []
+
+    # filter contours by size and aspect ratio
     #h_page, w_page = binary.shape
     for cnt in contours:
         area = cv2.contourArea(cnt)
