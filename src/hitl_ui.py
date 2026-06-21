@@ -302,7 +302,7 @@ class HITLEditor:
 
     # ── Hit testing ──────────────────────────────────────────────────────────
 
-    def _node_at(self, x: float, y: float) -> int | None:
+    def _node_at(self, x: float | int, y: float | int) -> int | None:
         best, best_d = None, HIT_RADIUS_PX
         for idx, n in enumerate(self.nodes):
             d = np.hypot(x - n.x, y - n.y)
@@ -310,7 +310,7 @@ class HITLEditor:
                 best, best_d = idx, d
         return best
 
-    def _edge_at(self, x: float, y: float) -> tuple[int, int] | None:
+    def _edge_at(self, x: float | int, y: float | int) -> tuple[int, int] | None:
         best, best_d = None, EDGE_HIT_PX
         for i, j in self.edges:
             n1, n2 = self.nodes[i], self.nodes[j]

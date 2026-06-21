@@ -120,7 +120,7 @@ def load_binary(image_path: str) -> tuple[np.ndarray, np.ndarray]:
 # ---------------------------------------------------------------------------
 
 def _fill_ratio(binary_inv: np.ndarray, cx: int, cy: int, r: int,
-                sample_frac: float = 0.70) -> float:
+                sample_frac: float | int = 0.70) -> float | int:
     """Fraction of pixels within sample_frac*r of (cx,cy) that are ink."""
     h, w = binary_inv.shape
     ys, xs = np.ogrid[:h, :w]
@@ -136,7 +136,7 @@ def _near_any(cx: int, cy: int, nodes: list[Node], threshold: int = PROXIMITY_PX
 
 
 def _mean_intensity(gray: np.ndarray, cx: int, cy: int, r: int,
-                    sample_frac: float = 0.4) -> float:
+                    sample_frac: float | int = 0.4) -> float | int:
     """Mean grayscale value within sample_frac*r of (cx, cy). High = white/hollow centre."""
     h, w = gray.shape
     ys, xs = np.ogrid[:h, :w]
@@ -146,7 +146,7 @@ def _mean_intensity(gray: np.ndarray, cx: int, cy: int, r: int,
 
 
 def _ring_ink_density(binary_inv: np.ndarray, cx: int, cy: int, r: int,
-                      n_angles: int = 24) -> float:
+                      n_angles: int = 24) -> float | int:
     """Fraction of circumference points at radius r that are ink.
 
     Real open circle nodes have their ring boundary as actual ink, so most
@@ -161,7 +161,7 @@ def _ring_ink_density(binary_inv: np.ndarray, cx: int, cy: int, r: int,
 
 
 def _radial_ink_count(binary_inv: np.ndarray, cx: int, cy: int, r: int,
-                      n_angles: int = 8, factor: float = 1.5) -> int:
+                      n_angles: int = 8, factor: float | int = 1.5) -> int:
     """Count how many of n_angles directions have ink at distance factor*r.
 
     Real nodes have edges attached, so several outward directions are ink.
