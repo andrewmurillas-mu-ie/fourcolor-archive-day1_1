@@ -20,7 +20,7 @@ from pathlib import Path
 import cv2
 import numpy as np
 
-DEFAULT_PDF = "Every_Planar_Map_is_Four_Colorable.pdf"
+DEFAULT_PDF = "../Every planar Map is Four Colorable part2 reducibility.pdf"
 DPI = 600          # 600 DPI doubles all pixel distances vs 300 DPI, giving a clear
                    # morphological gap between thin edges (~10px) and solid dots (~20px)
 MIN_CELL_AREA = 8_000   # px² — discard tiny noise contours

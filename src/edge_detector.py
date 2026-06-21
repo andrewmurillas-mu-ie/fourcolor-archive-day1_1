@@ -42,7 +42,7 @@ def _probe_line(
     x2: int, y2: int,
     skip1: int,
     skip2: int,
-) -> float:
+) -> float | int:
     """Return the ink fraction of pixels sampled along (x1,y1)→(x2,y2),
     skipping skip1 px at the start (node a's body) and skip2 px at the end
     (node b's body).

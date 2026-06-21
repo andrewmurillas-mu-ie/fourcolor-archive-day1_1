@@ -1,5 +1,5 @@
 """
-Batch node detection — runs detect_nodes on all crops_part2/ files from
+Batch node detection — runs detect_nodes on all crops/ files from
 page 14 onwards and writes results to detections_part2.json.
 
 Usage:
@@ -16,7 +16,7 @@ from pathlib import Path
 
 from src.node_detector import detect_nodes
 
-CROPS_DIR = Path("crops_part2")
+CROPS_DIR = Path("data/crops/")
 DEFAULT_OUT = Path("detections_part2.json")
 
 
@@ -26,7 +26,7 @@ def page_number(p: Path) -> int:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Batch node detection on crops_part2/")
+    parser = argparse.ArgumentParser(description="Batch node detection on crops/")
     parser.add_argument("--start-page", type=int, default=14,
                         help="First page index to process (default: 14)")
     parser.add_argument("--out", type=Path, default=DEFAULT_OUT,
