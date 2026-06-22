@@ -189,7 +189,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Phase 1: extract config crops from PDF page")
     parser.add_argument("--pdf",  default=DEFAULT_PDF, help="Path to Appel-Haken PDF")
     parser.add_argument("--page", type=int, default=0, help="0-based page index")
-    parser.add_argument("--out",  default="crops", help="Output directory for cropped images")
+    parser.add_argument("--out",  default="../data/crops", help="Output directory for cropped images")
     parser.add_argument("--debug", action="store_true", help="Save annotated overview image")
     args = parser.parse_args()
 

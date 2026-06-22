@@ -1,7 +1,5 @@
 .idea/
 .claude/
 __pycache__/
-crops/
-crops600/
 *.pdf
 data/*
