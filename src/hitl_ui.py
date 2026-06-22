@@ -22,9 +22,9 @@ Usage
 -----
   python hitl_ui.py crops_part2/page014_cell005.png
   python hitl_ui.py crops_part2/                         # browse all PNGs
-  python hitl_ui.py crops_part2/ --detections detections_part2.json
-  python hitl_ui.py crops_part2/ --detections detections_part2.json --skip-empty
-  python hitl_ui.py crops_part2/ --detections detections_part2.json --out annotations/
+  python hitl_ui.py crops_part2/ --detections detections_part.json
+  python hitl_ui.py crops_part2/ --detections detections_part.json --skip-empty
+  python hitl_ui.py crops_part2/ --detections detections_part.json --out annotations/
 """
 
 import argparse
@@ -508,7 +508,7 @@ def main():
     parser.add_argument("path", help="Path to a single crop PNG or a directory of PNGs")
     parser.add_argument("--out", default="annotations", help="Output directory for JSON files")
     parser.add_argument("--detections", type=Path, default=None,
-                        help="detections_part2.json from batch_detect.py — pre-populates nodes")
+                        help="detections_part.json from batch_detect.py — pre-populates nodes")
     parser.add_argument("--skip-empty", action="store_true",
                         help="Skip crops with zero detected nodes (only with --detections)")
     args = parser.parse_args()

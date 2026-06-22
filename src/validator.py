@@ -31,7 +31,7 @@ class Validator:
         Args:
             V: Total vertices in the configuration, including the r ring vertices.
             E_internal: Edges strictly between non-ring vertices.
-            E_attachment: Edges involving at least one ring vertex (ring-to-ring
+            E_attachment: E1dges involving at least one ring vertex (ring-to-ring
                 and ring-to-interior edges both count).
             r: Ring size (number of boundary vertices).
 

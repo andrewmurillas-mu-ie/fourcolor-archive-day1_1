@@ -63,6 +63,47 @@ def _probe_line(
 
 
 # ---------------------------------------------------------------------------
+# Occlusion guard
+# ---------------------------------------------------------------------------
+
+def _occluded_by_node(
+    x1: int, y1: int, x2: int, y2: int,
+    nodes: list[Node], skip_i: int, skip_j: int,
+    skip_a: float, skip_b: float,
+) -> bool:
+    """Return True if a third node's body lies within the active probe region.
+
+    Only triggers when the perpendicular distance from node k's centre to the
+    segment is strictly less than k's own radius — meaning the probe would
+    physically pass through k's body and pick up its ink.  The endpoint skip
+    zones (skip_a / skip_b) are excluded so triangle vertices that project
+    near the endpoints don't falsely block short edges.
+    """
+    dx, dy = x2 - x1, y2 - y1
+    length_sq = float(dx * dx + dy * dy)
+    if length_sq == 0:
+        return False
+    length = float(np.sqrt(length_sq))
+    # probe runs from t0 to t1 (skipping the node bodies at each end)
+    t0 = skip_a / length
+    t1 = 1.0 - skip_b / length
+    if t0 >= t1:
+        return False
+    for k, n in enumerate(nodes):
+        if k == skip_i or k == skip_j:
+            continue
+        t = ((n.x - x1) * dx + (n.y - y1) * dy) / length_sq
+        # only consider the probe region, not the endpoint skip zones
+        if t < t0 or t > t1:
+            continue
+        px = x1 + t * dx
+        py = y1 + t * dy
+        if np.hypot(n.x - px, n.y - py) < n.radius:
+            return True
+    return False
+
+
+# ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
 
@@ -84,6 +125,8 @@ def detect_edges(image_path: str, nodes: list[Node]) -> list[tuple[int, int]]:
             skip_b = b.radius + 4
             if dist <= skip_a + skip_b + 4:
                 continue  # nodes touching or overlapping
+            if _occluded_by_node(a.x, a.y, b.x, b.y, nodes, i, j, skip_a, skip_b):
+                continue
             if _probe_line(binary_inv, a.x, a.y, b.x, b.y, skip_a, skip_b) >= EDGE_INK_THRESHOLD:
                 edges.append((i, j))
 
