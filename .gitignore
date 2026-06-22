@@ -4,4 +4,4 @@ __pycache__/
 crops/
 crops600/
 *.pdf
-data/
+data/*
