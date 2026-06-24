@@ -1,14 +1,16 @@
 """
 Phase 1 — Image Pre-processing
 
-Converts a single page of the Appel-Haken PDF into clean, cropped sub-images,
+Converts pages of the Appel-Haken PDF into clean, cropped sub-images,
 one per configuration diagram.
 
 Usage:
-    python preprocessor.py                    # processes page 0 of the default PDF
-    python preprocessor.py --page 5           # page index (0-based)
-    python preprocessor.py --pdf path/to.pdf  # custom PDF path
-    python preprocessor.py --out crops/       # output directory for crops
+    python preprocessor.py                         # page 0 only
+    python preprocessor.py --page 5               # single page (0-based)
+    python preprocessor.py --pages 14-120         # inclusive range
+    python preprocessor.py --pages 14-120 --debug # also save annotated overview per page
+    python preprocessor.py --pdf path/to.pdf      # custom PDF path
+    python preprocessor.py --out crops/           # output directory for crops
 
 Requires:  pip install pymupdf
 """
@@ -42,8 +44,8 @@ def pdf_page_to_gray(pdf_path: str, page_index: int) -> np.ndarray:
 
     doc = fitz.open(pdf_path)
     if page_index >= len(doc):
-        sys.exit(f"Page {page_index} out of range — PDF has {len(doc)} pages.")
-
+        print(f"  Skipping page {page_index} — PDF only has {len(doc)} pages.")
+        return np.array([], dtype=np.uint8)
     page = doc[page_index]
     mat = fitz.Matrix(DPI / 72, DPI / 72)   # 72 pt/inch → target DPI
     pix = page.get_pixmap(matrix=mat, colorspace=fitz.csGRAY)
@@ -79,8 +81,8 @@ def binarise(gray: np.ndarray) -> np.ndarray:
 def find_config_boxes(binary: np.ndarray) -> list[tuple[int, int, int, int]]:
     """Return (x, y, w, h) bounding boxes for each detected configuration cell."""
 
-    # **dilate** to merge nearby strokes that belong to the same diagram
-    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (20, 20))
+    # dilate to merge strokes within the same diagram without merging adjacent diagrams
+    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (15, 15))
     dilated = cv2.dilate(binary, kernel, iterations=2)
 
     # find contours, discarding noise
@@ -158,6 +160,8 @@ def process_page(pdf_path: str, page_index: int, out_dir: str, debug: bool = Fal
 
     print(f"Loading page {page_index} from {pdf_path} at {DPI} DPI...")
     gray = pdf_page_to_gray(pdf_path, page_index)
+    if gray.size == 0:
+        return [], []
     gray = maybe_deskew(gray)
 
     print("Binarising...")
@@ -186,11 +190,30 @@ def process_page(pdf_path: str, page_index: int, out_dir: str, debug: bool = Fal
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Phase 1: extract config crops from PDF page")
-    parser.add_argument("--pdf",  default=DEFAULT_PDF, help="Path to Appel-Haken PDF")
-    parser.add_argument("--page", type=int, default=0, help="0-based page index")
-    parser.add_argument("--out",  default="../data/crops", help="Output directory for cropped images")
-    parser.add_argument("--debug", action="store_true", help="Save annotated overview image")
+    parser = argparse.ArgumentParser(description="Phase 1: extract config crops from PDF pages")
+    parser.add_argument("--pdf",   default=DEFAULT_PDF, help="Path to Appel-Haken PDF")
+    parser.add_argument("--page",  type=int, default=None, help="Single 0-based page index")
+    parser.add_argument("--pages", default=None,
+                        help="Inclusive page range, e.g. 14-120")
+    parser.add_argument("--out",   default="../data/crops", help="Output directory for crops")
+    parser.add_argument("--debug", action="store_true", help="Save annotated overview per page")
     args = parser.parse_args()
 
-    process_page(args.pdf, args.page, args.out, debug=args.debug)
+    if args.pages:
+        try:
+            start, end = (int(x) for x in args.pages.split("-"))
+        except ValueError:
+            sys.exit("--pages must be in the form START-END, e.g. 14-120")
+        page_list = range(start, end + 1)
+    elif args.page is not None:
+        page_list = [args.page]
+    else:
+        page_list = [0]
+
+    total_crops = 0
+    for pg in page_list:
+        crops, _ = process_page(args.pdf, pg, args.out, debug=args.debug)
+        total_crops += len(crops)
+
+    if len(page_list) > 1:
+        print(f"\nTotal crops saved: {total_crops} across {len(page_list)} pages.")
