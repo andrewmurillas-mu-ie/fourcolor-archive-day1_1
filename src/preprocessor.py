@@ -208,7 +208,7 @@ if __name__ == "__main__":
     elif args.page is not None:
         page_list = [args.page]
     else:
-        page_list = [0]
+        page_list = range(14, 121)
 
     total_crops = 0
     for pg in page_list:
