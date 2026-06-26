@@ -153,12 +153,12 @@ def ocr_page_labels(gray: np.ndarray) -> list[tuple[int, int, str]]:
             config="--psm 6 --oem 1",
             output_type=pytesseract.Output.DICT,
         )
-        labels: list[tuple[str, str, str]] = []
+        labels: list[tuple[int, int, str]] = []
         for i, text in enumerate(data["text"]):
             ch = text.strip().upper()
             if ch in ("C", "D", "c") and int(data["conf"][i]) > 0:
-                cx: str = data["left"][i] + data["width"][i] // 2
-                cy: str = data["top"][i] + data["height"][i] // 2
+                cx: int = data["left"][i] + data["width"][i] // 2
+                cy: int = data["top"][i] + data["height"][i] // 2
                 labels.append((cx, cy, ch))
                 print(f"  Found C/D label: {ch} at ({cx}, {cy})")
         labels.sort(key=lambda t: (t[1] // 100, t[0]))
