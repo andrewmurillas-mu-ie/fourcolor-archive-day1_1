@@ -23,7 +23,7 @@ import numpy as np
 from src.node_detector import Node, detect_nodes, load_binary
 
 # ---------------------------------------------------------------------------
-# Tuning constants
+# Constants
 # ---------------------------------------------------------------------------
 
 EDGE_INK_THRESHOLD = 0.40   # min ink fraction along the probe segment

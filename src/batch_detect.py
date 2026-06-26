@@ -12,6 +12,7 @@ import argparse
 import json
 import sys
 import time
+import os
 from dataclasses import asdict
 from pathlib import Path
 
@@ -25,9 +26,10 @@ from src.edge_detector import (
     RING_MAX,
 )
 
-CROPS_DIR = Path("data/crops/")
-DEFAULT_OUT = Path("data/detections_part.json")
+from dotenv import load_dotenv
 
+# Load environment  from the .env file
+load_dotenv()
 
 def page_number(p: Path) -> int:
     return int(p.stem.split("_")[0].replace("page", ""))
@@ -85,12 +87,12 @@ def run_crop(crop_path: Path) -> dict:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Batch pipeline: nodes + edges + validation")
-    parser.add_argument("--crops", type=Path, default=CROPS_DIR,
-                        help=f"Directory of crop PNGs (default: {CROPS_DIR})")
+    parser.add_argument("--crops", type=Path, default=os.getenv("CROPS_DIR"),
+                        help=f"Directory of crop PNGs (default: {os.getenv('CROPS_DIR')})")
     parser.add_argument("--start-page", type=int, default=14,
                         help="First page index to process (default: 14)")
-    parser.add_argument("--out", type=Path, default=DEFAULT_OUT,
-                        help=f"Output JSON path (default: {DEFAULT_OUT})")
+    parser.add_argument("--out", type=Path, default=os.getenv("DEFAULT_OUT"),
+                        help=f"Output JSON path (default: {os.getenv('DEFAULT_OUT')})")
     args = parser.parse_args()
 
     crops = sorted(

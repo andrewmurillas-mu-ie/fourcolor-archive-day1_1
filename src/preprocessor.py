@@ -17,13 +17,22 @@ Requires:  pip install pymupdf pytesseract pillow
 """
 
 import argparse
+import os
 import sys
 from pathlib import Path
 
 import cv2
 import numpy as np
 
-DEFAULT_PDF = "../Every planar Map is Four Colorable part2 reducibility.pdf"
+from dotenv import load_dotenv
+
+# Load environment variables from the .env file
+load_dotenv()
+
+# ---------------------------------------------------------------------------
+# Constants
+# ---------------------------------------------------------------------------
+
 DPI = 600          # 600 DPI doubles all pixel distances vs 300 DPI, giving a clear
                    # morphological gap between thin edges (~10px) and solid dots (~20px)
 MIN_CELL_AREA = 8_000   # px² — discard tiny noise contours
@@ -31,8 +40,6 @@ MAX_CELL_AREA = 1_000_000  # px² — discard full-page contour
 ASPECT_RATIO_BOUNDS = (0.4, 2.5)  # width/height range for a plausible config cell
 PADDING = 10        # px to add around each crop
 LABEL_SEARCH_GAP = 300   # px below graph bottom to look for its C/D letter
-LABEL_EXTRA_WIDTH = 100  # extra px on each side when saving label region to labels/
-
 
 # ---------------------------------------------------------------------------
 # Step 1 — PDF page → grayscale NumPy array
@@ -123,73 +130,14 @@ def find_config_boxes(binary: np.ndarray) -> list[tuple[int, int, int, int]]:
 
 def crop_configs(gray: np.ndarray, boxes: list[tuple[int, int, int, int]]) -> list[np.ndarray]:
     h_img, w_img = gray.shape
-    crops = []
+    config_crops = []
     for x, y, w, h in boxes:
         x0 = max(0, x - PADDING)
         y0 = max(0, y - PADDING)
         x1 = min(w_img, x + w + PADDING)
         y1 = min(h_img, y + h + PADDING)
-        crops.append(gray[y0:y1, x0:x1])
-    return crops
-
-
-# ---------------------------------------------------------------------------
-# Step 4b — OCR full page to locate C/D labels, then match to boxes
-# ---------------------------------------------------------------------------
-
-def ocr_page_labels(gray: np.ndarray) -> list[tuple[int, int, str]]:
-    """
-    Run Tesseract on the full page and return a list of
-    (centre_x, centre_y, 'C'|'D') for every standalone C or D character found,
-    sorted top-to-bottom then left-to-right (reading order).
-    Returns [] if pytesseract is not installed.
-    """
-    try:
-        import pytesseract
-        from PIL import Image
-
-        data: dict[str, str] = pytesseract.image_to_data(
-            Image.fromarray(gray),
-            config="--psm 6 --oem 1",
-            output_type=pytesseract.Output.DICT,
-        )
-        labels: list[tuple[int, int, str]] = []
-        for i, text in enumerate(data["text"]):
-            ch = text.strip().upper()
-            if ch in ("C", "D", "c") and int(data["conf"][i]) > 0:
-                cx: int = data["left"][i] + data["width"][i] // 2
-                cy: int = data["top"][i] + data["height"][i] // 2
-                labels.append((cx, cy, ch))
-                print(f"  Found C/D label: {ch} at ({cx}, {cy})")
-        labels.sort(key=lambda t: (t[1] // 100, t[0]))
-        return labels
-    except Exception:
-        return []
-
-
-def match_label(
-    box: tuple[int, int, int, int], labels: list[tuple[int, int, str]]
-) -> str:
-    """
-    Return the C/D letter whose centre falls directly below `box` within
-    LABEL_SEARCH_GAP px and horizontally overlaps the box.
-    Returns 'unknown' if nothing matches.
-    """
-    x, y, w, h = box
-    best_cls, best_dist = "unknown", LABEL_SEARCH_GAP + 1
-    for cx, cy, ch in labels:
-        if cy <= y + h:                          # must be below the graph
-            continue
-        if cy > y + h + LABEL_SEARCH_GAP:       # too far below
-            continue
-        if cx < x or cx > x + w:                # must overlap horizontally
-            continue
-        dist = cy - (y + h)
-        if dist < best_dist:
-            best_dist = dist
-            best_cls = ch
-    return best_cls
-
+        config_crops.append(gray[y0:y1, x0:x1])
+    return config_crops
 
 # ---------------------------------------------------------------------------
 # Step 5 — Perspective correction (optional, applied when page is skewed)
@@ -220,50 +168,32 @@ def process_page(pdf_path: str, page_index: int, out_dir: str, debug: bool = Fal
     out_path.mkdir(parents=True, exist_ok=True)
 
     print(f"Loading page {page_index} from {pdf_path} at {DPI} DPI...")
-    gray = pdf_page_to_gray(pdf_path, page_index)
-    if gray.size == 0:
+    grayed_pdf = pdf_page_to_gray(pdf_path, page_index)
+    if grayed_pdf.size == 0:
         return [], []
-    gray = maybe_deskew(gray)
+    grayed_pdf = maybe_deskew(grayed_pdf)
 
     print("Binarising...")
-    binary = binarise(gray)
+    binary = binarise(grayed_pdf)
 
     print("Detecting configuration cells...")
     boxes = find_config_boxes(binary)
     print(f"  Found {len(boxes)} candidate cells.")
 
-    print("Running OCR to locate C/D labels...")
-    page_labels = ocr_page_labels(gray)
-    print(f"  Found {len(page_labels)} C/D characters on page.")
-
-    crops = crop_configs(gray, boxes)
-    labels_dir = out_path / "labels"
-    labels_dir.mkdir(parents=True, exist_ok=True)
-    h_img, w_img = gray.shape
+    crops = crop_configs(grayed_pdf, boxes)
 
     for i, (crop, box) in enumerate(zip(crops, boxes)):
-        label_cls = match_label(box, page_labels)
 
-        # Save graph crop to c/, d/, or unknown/ subfolder
-        sub_dir = out_path / label_cls.lower()
+        # Save graph crop to /crops
+        sub_dir = out_path
         sub_dir.mkdir(parents=True, exist_ok=True)
         fname = sub_dir / f"page{page_index:03d}_cell{i:03d}.png"
         cv2.imwrite(str(fname), crop)
-        print(f"  Saved {fname}  [{label_cls}]  (box: x={box[0]} y={box[1]} w={box[2]} h={box[3]})")
-
-        # Save the region below the box to labels/ for manual verification
-        x, y, w, h = box
-        lx0 = max(0, x - LABEL_EXTRA_WIDTH)
-        lx1 = min(w_img, x + w + LABEL_EXTRA_WIDTH)
-        ly1 = min(h_img, y + h + LABEL_SEARCH_GAP)
-        label_region = gray[y + h: ly1, lx0: lx1]
-        if label_region.size > 0:
-            lfname = labels_dir / f"page{page_index:03d}_cell{i:03d}_{label_cls}.png"
-            cv2.imwrite(str(lfname), label_region)
+        print(f"  Saved {fname}  (box: x={box[0]} y={box[1]} w={box[2]} h={box[3]})")
 
     if debug:
         # Annotated overview saved alongside the crops
-        overview = cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR)
+        overview = cv2.cvtColor(grayed_pdf, cv2.COLOR_GRAY2BGR)
         for x, y, w, h in boxes:
             cv2.rectangle(overview, (x, y), (x + w, y + h), (0, 0, 255), 2)
         debug_path = out_path / f"page{page_index:03d}_debug.png"
@@ -272,10 +202,9 @@ def process_page(pdf_path: str, page_index: int, out_dir: str, debug: bool = Fal
 
     return crops, boxes
 
-
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Phase 1: extract config crops from PDF pages")
-    parser.add_argument("--pdf",   default=DEFAULT_PDF, help="Path to Appel-Haken PDF")
+    parser.add_argument("--pdf",   default=os.getenv("DEFAULT_PDF"), help="Path to Appel-Haken PDF")
     parser.add_argument("--page",  type=int, default=None, help="Single 0-based page index")
     parser.add_argument("--pages", default=None,
                         help="Inclusive page range, e.g. 14-120")
@@ -296,8 +225,8 @@ if __name__ == "__main__":
 
     total_crops = 0
     for pg in page_list:
-        crops, _ = process_page(args.pdf, pg, args.out, debug=args.debug)
-        total_crops += len(crops)
+        pg_crops, _ = process_page(args.pdf, pg, args.out, debug=args.debug)
+        total_crops += len(pg_crops)
 
     if len(page_list) > 1:
         print(f"\nTotal crops saved: {total_crops} across {len(page_list)} pages.")
