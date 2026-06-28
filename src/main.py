@@ -1,74 +1,66 @@
 from validator import Validator
+import json
 
 # ---------------------------------------------------------------------------
 # Hard-coded Configuration #1 — Ring-5 wheel (simplest valid configuration)
 #
-# One interior vertex (degree 5, "solid dot" in Appel-Haken notation) surrounded
-# by a ring of 5 vertices.
-#
-#       Ring vertices:  v1, v2, v3, v4, v5  (pentagon)
-#       Interior vertex: c  (connected to every ring vertex)
-#
-#   V            = 6   (5 ring + 1 interior)
-#   r            = 5
-#   E_attachment = 10  (5 ring-ring edges + 5 ring-interior spokes)
-#   E_internal   = 0   (no interior-to-interior edges; only 1 interior vertex)
-#
-#   Identity check:  3*6 - 5 - 3 = 10  ✓
+# One interior vertex (degree 5, "solid dot") surrounded by a ring of 5.
+# node_count=1 (interior only), ring_size=5, edge_count=0, e_attachment=10
+# Identity check: 3*(1+5) - 5 - 3 = 10  ✓
 # ---------------------------------------------------------------------------
 CONFIG_1 = {
-    "id": 1,
-    "label": "Ring-5 single interior vertex (solid dot)",
-    "V": 6,
-    "r": 5,
-    "E_internal": 0,
-    "E_attachment": 10,
+    "crop": "hardcoded_config_1",
+    "page": 0,
     "nodes": [
-        {"id": 0, "role": "ring"},
-        {"id": 1, "role": "ring"},
-        {"id": 2, "role": "ring"},
-        {"id": 3, "role": "ring"},
-        {"id": 4, "role": "ring"},
-        {"id": 5, "role": "interior", "shape": "solid_dot", "degree": 5},
+        {"x": 0, "y": 0, "radius": 10, "shape": "solid_dot", "degree": 5},
     ],
+    "node_count": 1,
     "edges": [
-        # ring cycle
-        {"from": 0, "to": 1}, {"from": 1, "to": 2}, {"from": 2, "to": 3},
-        {"from": 3, "to": 4}, {"from": 4, "to": 0},
-        # interior vertex → ring
-        {"from": 5, "to": 0}, {"from": 5, "to": 1}, {"from": 5, "to": 2},
-        {"from": 5, "to": 3}, {"from": 5, "to": 4},
+        {"from": 0, "to": 1}, {"from": 0, "to": 2}, {"from": 0, "to": 3},
+        {"from": 0, "to": 4},
     ],
+    "edge_count": 0,
+    "ring_size": 5,
+    "e_attachment": 10,
+    "euler_valid": True,
+    "validation_note": "r=5, E_att=10",
 }
 
 # ---------------------------------------------------------------------------
-# Deliberately broken configuration — used to confirm the validator rejects
-# invalid extractions (simulates a missed edge from the CV pipeline).
+# Deliberately broken configuration — one attachment edge missing.
 # ---------------------------------------------------------------------------
 CONFIG_BAD = {
-    "id": 99,
-    "label": "Ring-5 single interior vertex — one edge missing (bad CV extraction)",
-    "V": 6,
-    "r": 5,
-    "E_internal": 0,
-    "E_attachment": 9,   # one edge missing → should fail
+    "crop": "hardcoded_config_bad",
+    "page": 0,
+    "nodes": [
+        {"x": 0, "y": 0, "radius": 10, "shape": "solid_dot", "degree": 5},
+    ],
+    "node_count": 1,
+    "edges": [],
+    "edge_count": 0,
+    "ring_size": 5,
+    "e_attachment": 9,   # one edge missing → should fail
+    "euler_valid": False,
+    "validation_note": "r=5, E_att=9 (bad)",
 }
 
 
 def run_validation(cfg: dict, validator: Validator) -> None:
+    V = cfg["node_count"] + cfg["ring_size"]
     result = validator.check(
-        V=cfg["V"],
-        E_internal=cfg["E_internal"],
-        E_attachment=cfg["E_attachment"],
-        r=cfg["r"],
+        V=V,
+        E_internal=cfg["edge_count"],
+        E_attachment=cfg["e_attachment"],
+        r=cfg["ring_size"],
     )
-    label = cfg.get("label", f"Config #{cfg['id']}")
-    print(f"Config #{cfg['id']}  {label}")
+    print(f"Config {cfg['crop']}")
     print(f"  {result}")
     print()
 
 
 if __name__ == "__main__":
     v = Validator()
-    run_validation(CONFIG_1, v)
-    run_validation(CONFIG_BAD, v)
+    configs = json.load(open("../data/detections_part.json"))
+    for cfg in configs:
+        run_validation(cfg, v)
+    # run_validation(CONFIG_BAD, v)
