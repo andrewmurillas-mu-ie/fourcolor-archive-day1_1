@@ -46,6 +46,12 @@ CONFIG_BAD = {
 
 
 def run_validation(cfg: dict, validator: Validator) -> None:
+    if cfg.get("ring_size") is None or cfg.get("e_attachment") is None:
+        note = cfg.get("validation_note", "ring_size/e_attachment missing")
+        print(f"Config {cfg['crop']}")
+        print(f"  [SKIP] {note}")
+        print()
+        return
     V = cfg["node_count"] + cfg["ring_size"]
     result = validator.check(
         V=V,
