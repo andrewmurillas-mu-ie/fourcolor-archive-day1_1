@@ -1,0 +1,9 @@
+opencv-python-headless
+numpy
+networkx
+matplotlib
+python-dotenv
+pymupdf
+pytesseract
+pillow
+pytest
