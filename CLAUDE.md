@@ -199,13 +199,42 @@ you a regression test for every future extraction.
 
 ---
 
-## Current Progress (as of May 2026)
+## Current Progress (as of 14 Aug 2026 — 9-day sprint to submission)
 
-- Used AI to extract graphs from the Appel–Haken paper pages
-- Used AI to separate nodes and edges from individual graphs
-- Explored using Alloy to write a planar-graph model for automated validation
-- No complete working pipeline yet; direction was unclear — now clarified
-- Next meeting with Dr. Casey: Thursday 14 May 2026, 10am, Eolas Building
+- **Basic tier ~70% built** (June work): src/ pipeline (preprocessor →
+  node_detector → edge_detector → batch_detect), full HITL editor
+  (hitl_ui.py), 1,804 crops from the Part II PDF (pages 14–76),
+  1,821 detections of which 666 auto-pass structural validation.
+- **2026-08-14 merge** (from the day-1 fourcolor-archive repo, now retired):
+  canonical data model (src/configuration.py, schema v1.1), fail-fast
+  validator battery (src/validator.py), tests/ (15 passing),
+  requirements.txt. `Validator.check(V, E_internal, E_attachment, r)` is
+  API-stable for hitl_ui.py.
+- **Validation honesty fix**: the old `euler_valid` was tautological — ring
+  size was derived from the detected topology, then the identity "checked"
+  against that same ring (dead `Euler fail` branch). Proof it mattered:
+  page014_cell000 is the Birkhoff diamond; CV missed edge (2,3) and it
+  auto-passed with r=7 (true r=6). `euler_valid` now = full structural
+  battery (connectivity, planarity, degree consistency, ring in [3,14]);
+  the identity becomes a real test only with an INDEPENDENT labeled ring
+  (`batch_detect --ring-labels`, HITL, or caption OCR). `ring_delta` =
+  implied − labeled: +1 per missed edge, −1 per phantom edge.
+- Sibling repo `four-colour-dafny/` (Gonthier-style Dafny hypermaps) is
+  FROZEN — dissertation background chapter only.
+- Sprint plan: days 1–2 validator/merge (done) + ring-label ground truth
+  (OCR captions / section ranges); days 2–4 detector improvements + HITL
+  passes on the 1,155 unparsed crops; days 5–6 dataset production + Gold
+  D-reducibility engine; days 7–9 dissertation + verification.
+
+## Working agreements (two Claudes, one repo)
+
+- This repo is canonical. Cowork-Claude (cloud) and Claude Code (VS Code)
+  both work here; git arbitrates — commit early, small, descriptive.
+- Do not change `Validator.check()`'s signature (hitl_ui.py depends on it).
+- Schema changes require bumping SCHEMA_VERSION in src/configuration.py.
+- Never source a labeled ring from det["ring_size"] — that's circular.
+- Keep notable AI contributions logged (Casey's request): commit messages
+  or docs/ai-log.md.
 
 ---
 
