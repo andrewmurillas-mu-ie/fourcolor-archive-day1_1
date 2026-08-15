@@ -219,6 +219,24 @@ you a regression test for every future extraction.
   the identity becomes a real test only with an INDEPENDENT labeled ring
   (`batch_detect --ring-labels`, HITL, or caption OCR). `ring_delta` =
   implied − labeled: +1 per missed edge, −1 per phantom edge.
+- **Table U index + negative result** (src/ring_labels.py,
+  data/config_index.json): all 1,834 configurations mapped to
+  figure/position and crops; C/D letters for 1,426 (D: 1,030 — the Gold
+  worklist); 13 diagrams never cropped. Census-by-rank ring labelling was
+  REFUTED (p. 503: table ordered by major-vertex class, not ring size);
+  p. 504 census kept as dataset-level acceptance histogram. Ring labels
+  are hand/HITL-verified only (data/ring_labels.json; 2 so far).
+- **Label-free geometric invariants** (src/geometry.py, in the validator):
+  edge-crossing (phantom edges), near-triangulation of internal faces
+  (missed-edge holes, localized per face), interior/boundary attachment
+  accounting, outer-walk ring cross-check. Gated on connectivity.
+  Honest limitation pinned by test: a boundary-edge loss that yields a
+  *valid but different* configuration (the diamond case) is undetectable
+  without external info. Honest batch stats (data/detections_v2.json):
+  only 29/1,821 raw June detections survive the full battery — June's
+  "666 valid" included 240 disconnected graphs and 44 with geometrically
+  crossing edges. Detector improvement is the real remaining work:
+  disconnection (missed edges) 1,069 crops; then shape accuracy.
 - Sibling repo `four-colour-dafny/` (Gonthier-style Dafny hypermaps) is
   FROZEN — dissertation background chapter only.
 - Sprint plan: days 1–2 validator/merge (done) + ring-label ground truth

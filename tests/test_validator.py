@@ -167,3 +167,71 @@ def test_shape_degree_consistency_enforced():
         Vertex(0, 6, "solid_dot")
     with pytest.raises(ValueError):
         Vertex(0, 7, "triangle")  # triangle means >= 8
+
+
+# ------------------------------------------------------------------ #
+# Label-free geometric invariants (src/geometry.py)
+# ------------------------------------------------------------------ #
+def _diamond_with(edges):
+    pos = [(0.0, 1.0), (-1.0, 0.0), (0.0, -1.0), (1.0, 0.0)]
+    return Configuration(
+        id="geo", vertices=[Vertex(i, 5, pos=pos[i]) for i in range(4)],
+        edges=edges)
+
+
+def test_geometry_passes_on_correct_diamond():
+    rep = validate(birkhoff_diamond())
+    assert rep.ok, rep
+    assert rep.computed["ring_walk"] == rep.computed["ring_count"] == 6
+
+
+def test_internal_hole_caught_without_any_label():
+    # 4-cycle with NO diagonal: the interior face is a quadrilateral hole.
+    rep = validate(_diamond_with([(0, 1), (1, 2), (2, 3), (3, 0)]))
+    assert not rep.ok
+    assert any("NONTRIANGULAR_INTERIOR_FACE" in f for f in rep.failures)
+    assert any("RING_WALK_MISMATCH" in f for f in rep.failures)
+
+
+def test_crossing_phantom_edge_caught():
+    # both diagonals drawn: (0,2) and (1,3) cross as segments
+    rep = validate(_diamond_with(
+        [(0, 1), (1, 2), (2, 3), (3, 0), (0, 2), (1, 3)]))
+    assert not rep.ok
+    assert any("GEOM_EDGE_CROSSING" in f for f in rep.failures)
+
+
+def test_interior_vertex_attachment_caught():
+    # wheel: hub 0 fully surrounded by triangles; hub degree must equal its
+    # internal degree.  Claiming hub degree 6 with only 5 spokes must fail.
+    import math
+    ring = [(math.cos(2 * math.pi * k / 5),
+             math.sin(2 * math.pi * k / 5)) for k in range(5)]
+    cfg = Configuration(
+        id="wheel",
+        vertices=[Vertex(0, 6, pos=(0.0, 0.0))] +
+                 [Vertex(k + 1, 5, pos=ring[k]) for k in range(5)],
+        edges=[(0, k + 1) for k in range(5)] +
+              [(k + 1, (k + 1) % 5 + 1) for k in range(5)],
+    )
+    rep = validate(cfg)
+    assert not rep.ok
+    assert any("INTERIOR_VERTEX_ATTACHED" in f for f in rep.failures)
+    # with the correct hub degree 5 it is a valid interior:
+    # r = 30 - 10 - 18 + 3 = 5
+    cfg.vertices[0] = Vertex(0, 5, pos=(0.0, 0.0))
+    rep = validate(cfg)
+    assert rep.ok, rep
+    assert rep.computed["ring_walk"] == 5
+
+
+def test_boundary_edge_loss_is_undetectable_without_label():
+    """Pins the honest limitation: the June false positive (diamond with
+    BOUNDARY edge (2,3) missed) is triangle+pendant — a valid ring-7
+    interior.  Interior invariants cannot catch it; only an external ring
+    label (HITL/hand-verified) can.  See geometry.py docstring."""
+    rep = validate_detection(JUNE_DETECTION)          # no label
+    assert rep.ok
+    assert rep.computed["ring_walk"] == rep.computed["ring_count"] == 7
+    rep = validate_detection(JUNE_DETECTION, labeled_ring=6)  # labelled
+    assert not rep.ok

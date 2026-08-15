@@ -32,8 +32,10 @@ import networkx as nx
 
 try:  # support both `from src.validator import ...` and flat imports
     from src.configuration import Configuration
+    from src.geometry import geometric_report
 except ImportError:
     from configuration import Configuration
+    from geometry import geometric_report
 
 RING_MIN = 3
 RING_MAX = 14          # largest ring size in the historical set
@@ -173,6 +175,16 @@ def validate(cfg: Configuration) -> ValidationReport:
         fail(f"RING_TOO_LARGE: implied ring {implied_r} > {RING_MAX} "
              f"(historical max) — likely a missed internal edge or misread "
              f"shape")
+
+    # --- label-free geometric invariants (see geometry.py) ------------- #
+    # Only meaningful on a connected drawing: face traversal and the outer
+    # walk are undefined across components (and isolated vertices have no
+    # rotation order at all).  A disconnected extraction has already failed.
+    if not any(f.startswith("DISCONNECTED") for f in rep.failures):
+        geo = geometric_report(cfg)
+        rep.failures.extend(geo.failures)
+        rep.warnings.extend(geo.warnings)
+        rep.computed.update(geo.computed)
 
     # --- the independent cross-check ----------------------------------- #
     if cfg.ring_size is not None:

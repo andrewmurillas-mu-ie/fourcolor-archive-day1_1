@@ -174,9 +174,11 @@ def birkhoff_diamond() -> Configuration:
     4 of its 5 edges and still auto-passed with ring 7. That false positive
     is the motivating example for labeled-ring cross-checking.
     """
+    diamond_pos = [(0.0, 1.0), (-1.0, 0.0), (0.0, -1.0), (1.0, 0.0)]
     return Configuration(
         id="birkhoff-diamond",
-        vertices=[Vertex(i, 5, "solid_dot") for i in range(4)],
+        vertices=[Vertex(i, 5, "solid_dot", pos=diamond_pos[i])
+                  for i in range(4)],
         edges=[(0, 1), (1, 2), (2, 3), (3, 0), (0, 2)],
         ring_size=6,
         reducibility="D",
