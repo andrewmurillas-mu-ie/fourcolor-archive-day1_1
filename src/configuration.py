@@ -32,6 +32,9 @@ DEGREE_SHAPES = {d: s for s, d in SHAPE_DEGREES.items()}
 
 @dataclass
 class Vertex:
+    """One interior vertex: id, specified degree, Heesch shape, pixel pos.
+
+    Shape-degree consistency is enforced at construction."""
     id: int
     degree: int                     # degree in the FULL triangulation
     shape: Optional[str] = None     # Heesch symbol as drawn
@@ -55,6 +58,7 @@ class Vertex:
 
 @dataclass
 class Provenance:
+    """Where a configuration record came from and how it was produced."""
     source_document: Optional[str] = None   # e.g. "Part II PDF, p. 14"
     crop: Optional[str] = None              # e.g. "page014_cell000.png"
     figure_ref: Optional[str] = None        # e.g. "CTL #101" once OCR'd
@@ -65,6 +69,9 @@ class Provenance:
 
 @dataclass
 class Configuration:
+    """Canonical record of one configuration: interior vertices + internal
+    edges (+ labeled ring size, reducibility class, provenance).  The ring
+    itself is never stored — implied and cross-checked by the validator."""
     id: str
     vertices: list[Vertex]
     edges: list[tuple[int, int]]            # internal edges only
@@ -74,16 +81,20 @@ class Configuration:
 
     @property
     def n_vertices(self) -> int:
+        """Number of interior vertices (V_int)."""
         return len(self.vertices)
 
     @property
     def n_internal_edges(self) -> int:
+        """Number of internal (interior-interior) edges (E_int)."""
         return len(self.edges)
 
     def degree_sum(self) -> int:
+        """Sum of specified degrees over interior vertices (the sigma-d)."""
         return sum(v.degree for v in self.vertices)
 
     def internal_degree(self) -> dict[int, int]:
+        """Per-vertex count of internal edges (deg_int), keyed by vertex id."""
         d = {v.id: 0 for v in self.vertices}
         for u, w in self.edges:
             d[u] += 1
@@ -133,17 +144,20 @@ class Configuration:
     # Serialization
     # ------------------------------------------------------------------ #
     def to_dict(self) -> dict:
+        """Serialise to a plain dict (adds schema_version, listifies edges)."""
         out = asdict(self)
         out["schema_version"] = SCHEMA_VERSION
         out["edges"] = [list(e) for e in self.edges]
         return out
 
     def to_json(self, **kwargs) -> str:
+        """Serialise to JSON text (indent=2 by default)."""
         kwargs.setdefault("indent", 2)
         return json.dumps(self.to_dict(), **kwargs)
 
     @classmethod
     def from_dict(cls, d: dict) -> "Configuration":
+        """Inverse of to_dict (tolerates a missing provenance block)."""
         d = dict(d)
         d.pop("schema_version", None)
         d["vertices"] = [
@@ -160,6 +174,7 @@ class Configuration:
 
     @classmethod
     def from_json(cls, s: str) -> "Configuration":
+        """Inverse of to_json."""
         return cls.from_dict(json.loads(s))
 
 

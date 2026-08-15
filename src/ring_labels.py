@@ -147,6 +147,8 @@ def _cluster_1d(values: np.ndarray, n_clusters: int) -> np.ndarray:
 
 
 def load_page(pdf_path: str, page_index: int):
+    """Replicate the preprocessor for one page: returns (gray, binary,
+    boxes, deskew_matrix) with boxes in the crops' cell order."""
     gray = pdf_page_to_gray(pdf_path, page_index)
     if gray.size == 0:
         return None, None, None, None
@@ -158,6 +160,8 @@ def load_page(pdf_path: str, page_index: int):
 
 
 def main() -> None:
+    """CLI: build data/config_index.json (all Table U slots) and
+    data/ring_labels.json (hand-verified ring labels only)."""
     ap = argparse.ArgumentParser(description="Extract ring-label ground truth")
     ap.add_argument("--pdf", default="part2.pdf")
     ap.add_argument("--out", type=Path, default=Path("data"))

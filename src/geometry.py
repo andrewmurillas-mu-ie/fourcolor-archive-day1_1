@@ -51,6 +51,8 @@ EPS = 1e-9
 
 @dataclass
 class GeometryReport:
+    """Result of the geometric battery: ok, failures, warnings, computed
+    quantities (faces, outer_walk_len, ring_walk, ring_count)."""
     ok: bool
     failures: list[str] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
@@ -154,6 +156,8 @@ def _segments_cross(p1, p2, p3, p4) -> bool:
 
 
 def crossing_edges(cfg: Configuration) -> list[tuple[tuple, tuple]]:
+    """All pairs of non-adjacent drawn edges that properly cross as
+    segments — in a planar source at least one of each pair is phantom."""
     pos = {v.id: v.pos for v in cfg.vertices}
     crossings = []
     edges = cfg.edges

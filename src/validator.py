@@ -47,6 +47,7 @@ MIN_DEGREE = 5
 # ====================================================================== #
 @dataclass
 class ValidationResult:
+    """Verdict of the legacy identity check (layer 1)."""
     is_valid: bool
     V: int
     r: int
@@ -85,6 +86,8 @@ class Validator:
 # ====================================================================== #
 @dataclass
 class ValidationReport:
+    """Verdict of the fail-fast battery: ok, failures (reject), warnings
+    (advisory), computed quantities (V/E/ring numbers, ring_delta)."""
     ok: bool
     failures: list[str] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)

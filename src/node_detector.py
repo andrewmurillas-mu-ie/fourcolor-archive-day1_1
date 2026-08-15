@@ -80,6 +80,14 @@ DEGREE_MAP = {
 
 @dataclass
 class Node:
+    """One detected vertex in a configuration crop.
+
+    Attributes:
+        x, y:    centre in crop pixel coordinates (600 DPI).
+        radius:  marker radius in pixels (used for probe skip zones and UI).
+        shape:   Heesch symbol: solid_dot | open_circle | square | triangle.
+        degree:  specified degree implied by the shape (see DEGREE_MAP).
+    """
     x: int
     y: int
     radius: int
@@ -101,6 +109,12 @@ def _load_denoised(image_path: str) -> np.ndarray:
 
 
 def _binarise(denoised: np.ndarray, block_size: int) -> np.ndarray:
+    """Adaptive-threshold to an ink mask (ink=255, paper=0).
+
+    block_size controls the Gaussian window: 31 preserves thin lines and
+    open-circle rims; 61 keeps large solid discs filled (see
+    SOLID_BINARISE_BLOCK comment above).
+    """
     return cv2.adaptiveThreshold(
         denoised, 255,
         cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
@@ -239,6 +253,9 @@ def detect_solid_dots(binary_inv: np.ndarray,
 
 def detect_open_circles(gray: np.ndarray, binary_inv: np.ndarray,
                         existing: list[Node]) -> list[Node]:
+    """Hough-circle pass for degree-6 hollow rings: candidates must have a
+    bright centre, ink on the rim, and outward ink (attached edges);
+    candidates near already-found nodes are suppressed."""
     blurred = cv2.GaussianBlur(gray, (5, 5), 1.5)
     circles = cv2.HoughCircles(
         blurred,
@@ -275,6 +292,8 @@ def detect_open_circles(gray: np.ndarray, binary_inv: np.ndarray,
 # ---------------------------------------------------------------------------
 
 def detect_polygon_nodes(binary_inv: np.ndarray, existing: list[Node]) -> list[Node]:
+    """Contour pass for squares (degree 7) and triangles (degree 8): low
+    circularity blobs classified by approxPolyDP corner count."""
     contours, _ = cv2.findContours(binary_inv, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     nodes: list[Node] = []
 
@@ -319,6 +338,14 @@ def detect_polygon_nodes(binary_inv: np.ndarray, existing: list[Node]) -> list[N
 # ---------------------------------------------------------------------------
 
 def detect_nodes(image_path: str) -> list[Node]:
+    """Detect and classify all vertices in a configuration crop.
+
+    Three passes in fixed priority order, each suppressing candidates within
+    PROXIMITY_PX of an earlier hit: solid dots (distance-transform peaks),
+    open circles (Hough on the rim), then squares/triangles (polygon
+    contours).  Returns Nodes in detection order — this index order is the
+    node id used by edge lists and downstream JSON.
+    """
     gray, binary_inv = load_binary(image_path)
     binary_inv_solid = _binarise(gray, SOLID_BINARISE_BLOCK)
     solid_dots = detect_solid_dots(binary_inv, binary_inv_solid)
@@ -340,6 +367,8 @@ COLOURS = {
 
 
 def draw_nodes(image_path: str, nodes: list[Node], out_path: str | None = None) -> np.ndarray:
+    """Render detections over the crop (colour-coded by shape, labelled with
+    degree).  Writes to out_path when given; returns the annotated image."""
     img = cv2.imread(image_path)
     if img is None:
         raise FileNotFoundError(f"Cannot read image: {image_path}")
@@ -358,6 +387,8 @@ def draw_nodes(image_path: str, nodes: list[Node], out_path: str | None = None) 
 # ---------------------------------------------------------------------------
 
 def main() -> None:
+    """CLI: detect nodes in one crop and print a table (--debug saves an
+    annotated image alongside the input)."""
     parser = argparse.ArgumentParser(description="Phase 2: detect nodes in a config crop")
     parser.add_argument("image", help="Path to crop PNG")
     parser.add_argument("--debug", action="store_true", help="Save annotated image alongside input")

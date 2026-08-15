@@ -1,4 +1,12 @@
-from validator import Validator
+"""Casey Phase-3 milestone script (historical): validate hard-coded
+configurations, then batch-validate detections_part.json via the legacy
+``Validator.check`` API.  Superseded by ``python -m src.batch_detect`` +
+the fail-fast battery; kept as the original regression harness."""
+
+try:  # package import (python -m src.main, pdoc) or flat (python main.py)
+    from src.validator import Validator
+except ImportError:
+    from validator import Validator
 import json
 
 # ---------------------------------------------------------------------------
@@ -46,6 +54,7 @@ CONFIG_BAD = {
 
 
 def run_validation(cfg: dict, validator: Validator) -> None:
+    """Print the legacy identity-check verdict for one detection dict."""
     if cfg.get("ring_size") is None or cfg.get("e_attachment") is None:
         note = cfg.get("validation_note", "ring_size/e_attachment missing")
         print(f"Config {cfg['crop']}")

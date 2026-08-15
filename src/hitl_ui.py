@@ -39,8 +39,12 @@ import numpy as np
 from typing import Any
 from mpl_toolkits.axes_grid1.mpl_axes import Axes
 
-from node_detector import Node, detect_nodes, load_binary, DEGREE_MAP
-from validator import Validator
+try:  # package import (python -m src.hitl_ui, pdoc) or flat (python hitl_ui.py)
+    from src.node_detector import Node, detect_nodes, load_binary, DEGREE_MAP
+    from src.validator import Validator
+except ImportError:
+    from node_detector import Node, detect_nodes, load_binary, DEGREE_MAP
+    from validator import Validator
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Constants
@@ -70,7 +74,9 @@ _validator = Validator()
 # ──────────────────────────────────────────────────────────────────────────────
 
 def _probe_edge(binary_inv: np.ndarray, n1: Node, n2: Node) -> bool:
-    """Return True if enough dark pixels lie along the line between n1 and n2."""
+    """Return True if enough ink lies along the straight line between n1 and
+    n2 (UI-local re-probe used when nodes are added or moved; mirrors
+    edge_detector's line-probe method)."""
     x1, y1, x2, y2 = n1.x, n1.y, n2.x, n2.y
     length = float(np.hypot(x2 - x1, y2 - y1))
     # Skip at least the node's own radius so we don't sample through the node disc.
@@ -94,6 +100,7 @@ def _probe_edge(binary_inv: np.ndarray, n1: Node, n2: Node) -> bool:
 
 
 def probe_all_edges(binary_inv: np.ndarray, nodes: list[Node]) -> set[tuple[int, int]]:
+    """Probe every node pair; return the detected edge set as (i, j), i<j."""
     edges: set[tuple[int, int]] = set()
     for i in range(len(nodes)):
         for j in range(i + 1, len(nodes)):
@@ -107,6 +114,28 @@ def probe_all_edges(binary_inv: np.ndarray, nodes: list[Node]) -> set[tuple[int,
 # ──────────────────────────────────────────────────────────────────────────────
 
 class HITLEditor:
+    """Interactive matplotlib editor for correcting one configuration crop.
+
+    Layout: crop image with node/edge overlay (left), live validator panel
+    (right), button bar (bottom).  Graph state lives in ``self.nodes`` (list
+    of Node — list index IS the node id) and ``self.edges`` (set of (i, j)
+    with i < j).  Ring size ``self.r`` and ``self.e_attach`` are
+    user-adjustable because they are not derivable from the drawing alone;
+    the info panel re-runs ``Validator.check`` after every mutation and
+    ``_save`` refuses to write JSON until it passes.
+
+    NOTE (schema debt): ``_save`` writes an ad-hoc annotation dict, not the
+    canonical schema in src/configuration.py — convert with
+    ``Configuration.from_detection`` downstream, or unify when the HITL
+    workflow is next touched.
+
+    Constructor args:
+        image_path:      crop PNG to edit.
+        out_dir:         where corrected JSONs are written (one per crop).
+        preloaded_nodes: skip auto-detection and start from these nodes
+                         (used with --detections to resume batch output).
+    """
+
     def __init__(self, image_path: str, out_dir: str = "annotations",
                  preloaded_nodes: list[Node] | None = None):
         self.image_path = Path(image_path)
@@ -186,6 +215,8 @@ class HITLEditor:
     # ── Drawing ──────────────────────────────────────────────────────────────
 
     def redraw(self):
+        """Repaint everything: crop, edges, nodes (shape-coloured rings with
+        degree labels), title, and the live validator info panel."""
         self.ax.cla()
         self.ax.set_facecolor("#1e1e2e")
         self.ax.axis("off")
@@ -440,6 +471,9 @@ class HITLEditor:
         self.redraw()
 
     def _save(self):
+        """Write the corrected graph to ``out_dir/<crop>.json`` — only if the
+        identity check passes with the operator-supplied r and E_attachment
+        (fail flashes the panel red; success flashes green)."""
         result = _validator.check(
             V            = len(self.nodes) + self.r,
             E_internal   = len(self.edges),
@@ -494,7 +528,9 @@ class HITLEditor:
         threading.Thread(target=_reset, daemon=True).start()
 
     def _advance(self, direction: int):
-        # Signal to the outer loop which image to open next
+        """Close this editor and tell main()'s loop to open the previous
+        (-1) or next (+1) crop; closing the window normally (direction 0)
+        ends the session."""
         self._next_direction = direction
         plt.close(self.fig)
 
@@ -504,6 +540,9 @@ class HITLEditor:
 # ──────────────────────────────────────────────────────────────────────────────
 
 def main():
+    """CLI: open the editor on one crop or browse a directory (N/P keys).
+    --detections pre-populates nodes from batch output in JSON order;
+    --skip-empty then skips crops where detection found nothing."""
     parser = argparse.ArgumentParser(description="HITL correction UI for Appel-Haken configurations")
     parser.add_argument("path", help="Path to a single crop PNG or a directory of PNGs")
     parser.add_argument("--out", default="annotations", help="Output directory for JSON files")

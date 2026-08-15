@@ -46,6 +46,12 @@ LABEL_SEARCH_GAP = 300   # px below graph bottom to look for its C/D letter
 # ---------------------------------------------------------------------------
 
 def pdf_page_to_gray(pdf_path: str, page_index: int) -> np.ndarray:
+    """Render one PDF page (0-based index) to a grayscale array at DPI=600.
+
+    Returns an empty array if page_index is past the end of the document.
+    600 DPI is load-bearing: every pixel constant in node_detector.py and
+    edge_detector.py is calibrated to it.
+    """
     try:
         import fitz  # PyMuPDF
     except ImportError:
@@ -68,6 +74,7 @@ def pdf_page_to_gray(pdf_path: str, page_index: int) -> np.ndarray:
 # ---------------------------------------------------------------------------
 
 def binarise(gray: np.ndarray) -> np.ndarray:
+    """Median-denoise + Gaussian adaptive threshold -> ink mask (ink=255)."""
     # Salt-and-pepper noise from scanning
     denoised = cv2.medianBlur(gray, ksize=3)
 
@@ -129,6 +136,8 @@ def find_config_boxes(binary: np.ndarray) -> list[tuple[int, int, int, int]]:
 # ---------------------------------------------------------------------------
 
 def crop_configs(gray: np.ndarray, boxes: list[tuple[int, int, int, int]]) -> list[np.ndarray]:
+    """Cut each detected box out of the page with PADDING px on every side
+    (clamped at page borders).  Crop k corresponds to box k in order."""
     h_img, w_img = gray.shape
     config_crops = []
     for x, y, w, h in boxes:
@@ -164,6 +173,14 @@ def maybe_deskew(gray: np.ndarray) -> np.ndarray:
 # ---------------------------------------------------------------------------
 
 def process_page(pdf_path: str, page_index: int, out_dir: str, debug: bool = False):
+    """Full Phase-1 pipeline for one page: render -> deskew -> binarise ->
+    detect cells -> save crops as page{p:03d}_cell{k:03d}.png.
+
+    DETERMINISM CONTRACT: given the same PDF and page, this always produces
+    identical boxes in identical order.  src/ring_labels.py relies on it to
+    map existing crops back to Table U slots without re-reading the crops.
+    Returns (crops, boxes).
+    """
     out_path = Path(out_dir)
     out_path.mkdir(parents=True, exist_ok=True)
 

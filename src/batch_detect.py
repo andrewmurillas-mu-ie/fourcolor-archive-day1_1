@@ -40,10 +40,13 @@ load_dotenv()
 
 
 def page_number(p: Path) -> int:
+    """PDF page index from a crop filename (page014_cell000.png -> 14)."""
     return int(p.stem.split("_")[0].replace("page", ""))
 
 
 def run_crop(crop_path: Path, labeled_ring: int | None = None) -> dict:
+    """Detect nodes+edges in one crop and validate; returns the detection
+    dict (nodes, edges, implied ring, failures/warnings, euler_valid)."""
     nodes = detect_nodes(str(crop_path))
     edges = detect_edges(str(crop_path), nodes)
 
@@ -89,6 +92,8 @@ def run_crop(crop_path: Path, labeled_ring: int | None = None) -> dict:
 
 
 def main() -> None:
+    """CLI: run the full detect+validate pipeline over a crops directory and
+    write detections JSON with an honest per-failure-type summary."""
     parser = argparse.ArgumentParser(
         description="Batch pipeline: nodes + edges + fail-fast validation")
     parser.add_argument("--crops", type=Path, default=os.getenv("CROPS_DIR"),

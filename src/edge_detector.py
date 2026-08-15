@@ -171,6 +171,7 @@ def degree_check(nodes: list[Node], edges: list[tuple[int, int]]) -> bool:
 
 def draw_edges(image_path: str, nodes: list[Node],
                edges: list[tuple[int, int]], out_path: str) -> None:
+    """Save a debug image with detected edges and node outlines overlaid."""
     img = cv2.imread(image_path)
     if img is None:
         raise FileNotFoundError(f"Cannot read image: {image_path}")
@@ -187,6 +188,8 @@ def draw_edges(image_path: str, nodes: list[Node],
 # ---------------------------------------------------------------------------
 
 def main() -> None:
+    """CLI: detect edges in one crop, print ring/degree/identity summary
+    (--debug saves an annotated image alongside the input)."""
     parser = argparse.ArgumentParser(description="Phase 2b: detect edges in a config crop")
     parser.add_argument("image", help="Path to crop PNG")
     parser.add_argument("--debug", action="store_true",
