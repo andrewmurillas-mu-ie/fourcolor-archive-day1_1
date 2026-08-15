@@ -93,6 +93,7 @@ class Node:
     radius: int
     shape: str       # solid_dot | open_circle | square | triangle
     degree: int
+    recovered: bool = False   # True if added by junction-guided recovery
 
 
 # ---------------------------------------------------------------------------
@@ -411,3 +412,62 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
+# ---------------------------------------------------------------------------
+# Weak candidates (for sensor fusion in extract.py)
+# ---------------------------------------------------------------------------
+
+def detect_weak_candidates(image_path: str,
+                           existing: list[Node]) -> list[Node]:
+    """Low-threshold node candidates for FUSION, never for direct use.
+
+    Runs the solid-dot and open-circle detectors with permissive settings
+    (dist-transform floor 6 px instead of 10; Hough accumulator 12 instead
+    of 18; relaxed fill/rim gates).  On its own this over-detects wildly —
+    callers must only accept a weak candidate when independent evidence
+    (e.g. a skeleton junction or loose-end cluster at the same spot) agrees.
+    Candidates within PROXIMITY_PX of `existing` nodes are suppressed.
+    """
+    gray, binary_inv = load_binary(image_path)
+    binary_solid = _binarise(gray, SOLID_BINARISE_BLOCK)
+    out: list[Node] = []
+
+    # weak solid dots: lower distance-transform floor, relaxed fill
+    close_k = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (9, 9))
+    closed = cv2.morphologyEx(binary_solid, cv2.MORPH_CLOSE, close_k)
+    dist = cv2.distanceTransform(closed, cv2.DIST_L2, 5)
+    ksize = PROXIMITY_PX * 2 + 1
+    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (ksize, ksize))
+    local_max = cv2.dilate(dist, kernel)
+    peak_mask = ((dist >= local_max - 0.5) & (dist >= 6.0)).astype(np.uint8)
+    num, labels, _, _ = cv2.connectedComponentsWithStats(peak_mask)
+    for lbl in range(1, num):
+        comp = labels == lbl
+        peak = float(dist[comp].max())
+        pys, pxs = np.where(comp & (dist >= peak - 0.5))
+        cx, cy, r = int(pxs.mean()), int(pys.mean()), max(1, int(peak))
+        if _fill_ratio(binary_solid, cx, cy, r, 0.5) < 0.5:
+            continue
+        if _near_any(cx, cy, existing + out):
+            continue
+        out.append(Node(x=cx, y=cy, radius=r, shape="solid_dot", degree=5,
+                        recovered=True))
+
+    # weak open circles: permissive Hough
+    blurred = cv2.GaussianBlur(gray, (5, 5), 1.5)
+    circles = cv2.HoughCircles(blurred, cv2.HOUGH_GRADIENT, dp=1.2,
+                               minDist=HOUGH_MIN_DIST, param1=50, param2=12,
+                               minRadius=HOUGH_MIN_RADIUS,
+                               maxRadius=HOUGH_MAX_RADIUS)
+    if circles is not None:
+        for cx, cy, r in np.round(circles[0]).astype(int):
+            cx, cy, r = int(cx), int(cy), int(r)
+            if _near_any(cx, cy, existing + out):
+                continue
+            if _mean_intensity(gray, cx, cy, r) < 140:
+                continue
+            if _ring_ink_density(binary_inv, cx, cy, r) < 0.35:
+                continue
+            out.append(Node(x=cx, y=cy, radius=r, shape="open_circle",
+                            degree=6, recovered=True))
+    return out

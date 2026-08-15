@@ -1,0 +1,140 @@
+[
+  {
+    "crop": "page014_cell000.png",
+    "ring": 6,
+    "nodes": [
+      {
+        "x": 123,
+        "y": 42,
+        "shape": "solid_dot",
+        "degree": 5
+      },
+      {
+        "x": 46,
+        "y": 146,
+        "shape": "solid_dot",
+        "degree": 5
+      },
+      {
+        "x": 192,
+        "y": 146,
+        "shape": "solid_dot",
+        "degree": 5
+      },
+      {
+        "x": 124,
+        "y": 223,
+        "shape": "solid_dot",
+        "degree": 5
+      }
+    ],
+    "edges": [
+      [
+        0,
+        1
+      ],
+      [
+        0,
+        2
+      ],
+      [
+        1,
+        2
+      ],
+      [
+        1,
+        3
+      ],
+      [
+        2,
+        3
+      ]
+    ],
+    "provenance": "hand-verified 2026-08-14 (fig 1 pos 1)"
+  },
+  {
+    "crop": "page014_cell003.png",
+    "ring": 5,
+    "nodes": [
+      {
+        "x": 200,
+        "y": 41,
+        "shape": "solid_dot",
+        "degree": 5
+      },
+      {
+        "x": 43,
+        "y": 48,
+        "shape": "solid_dot",
+        "degree": 5
+      },
+      {
+        "x": 123,
+        "y": 124,
+        "shape": "solid_dot",
+        "degree": 5
+      },
+      {
+        "x": 208,
+        "y": 167,
+        "shape": "solid_dot",
+        "degree": 5
+      },
+      {
+        "x": 38,
+        "y": 178,
+        "shape": "solid_dot",
+        "degree": 5
+      },
+      {
+        "x": 123,
+        "y": 209,
+        "shape": "solid_dot",
+        "degree": 5
+      }
+    ],
+    "edges": [
+      [
+        0,
+        1
+      ],
+      [
+        0,
+        2
+      ],
+      [
+        0,
+        3
+      ],
+      [
+        1,
+        2
+      ],
+      [
+        1,
+        4
+      ],
+      [
+        2,
+        3
+      ],
+      [
+        2,
+        4
+      ],
+      [
+        2,
+        5
+      ],
+      [
+        3,
+        5
+      ],
+      [
+        4,
+        5
+      ]
+    ],
+    "provenance": "hand-verified 2026-08-14 (fig 1 pos 5)"
+  }
+]

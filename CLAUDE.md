@@ -237,6 +237,25 @@ you a regression test for every future extraction.
   "666 valid" included 240 disconnected graphs and 44 with geometrically
   crossing edges. Detector improvement is the real remaining work:
   disconnection (missed edges) 1,069 crops; then shape accuracy.
+- **Day 2 edge detection** (src/extract.py, edge_detector skeleton
+  tracer): chord probes replaced by ink-topology tracing (close gaps ->
+  Zhang-Suen thinning -> erase node discs -> components = edges). Battery
+  pass 29 -> 50; phantom classes eliminated (crossings 6,341 -> 0,
+  nonplanar 305 -> 0, degree overflow 681 -> 6). DISCONNECTED rose
+  1,069 -> 1,630 honestly: June's connectivity was partly phantom-built.
+  Remaining bottleneck = node detection recall (junction/loose-end
+  diagnostics point HITL at candidate missed vertices). Junction node
+  recovery measured NET-NEGATIVE in all tried gatings -> off by default
+  (see src/extract.py docstring). Measurement: src/evaluate.py (battery
+  diff + golden set, data/golden.json — grow it via HITL).
+- **Day 2 afternoon — validator-guarded attempt ladder** (batch_detect +
+  src/extract.py): extract plain first; on battery failure retry with
+  sensor-fusion vertex recovery (crossing-number branch points / loose-end
+  clusters confirmed by a weak node detector) and/or corridor edges; keep
+  a variant only if the battery then passes. Monotone by construction:
+  29 (June honest) -> 50 (skeleton) -> **81 passes, 0 broken**. Rungs
+  fired: corridor 16, recovery 14, both 1 — all flagged "verify in HITL"
+  (battery-pass is not ground truth). batch_detect gained --workers.
 - Sibling repo `four-colour-dafny/` (Gonthier-style Dafny hypermaps) is
   FROZEN — dissertation background chapter only.
 - Sprint plan: days 1–2 validator/merge (done) + ring-label ground truth

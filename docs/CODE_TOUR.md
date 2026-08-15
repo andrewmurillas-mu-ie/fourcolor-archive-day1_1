@@ -100,12 +100,26 @@ Known weakness: circles misread as dots (the −1 ring bias) — Phase-2
 hardening target.
 
 ### 6. `src/edge_detector.py` — Phase 2b (edges)
-Line-probe: sample the straight segment between node centres (skipping node
-bodies), edge iff ink fraction ≥ 0.40, with an occlusion guard so probes
-through a third node don't count. Also home of `infer_ring_size` (the
-counting formula) and `degree_check`. Known weakness — the current
-bottleneck: straight probes fail on wobbly hand-drawn strokes ⇒ 1,069/1,821
-extractions disconnected. Day-2 plan: corridor probe, then skeleton tracing.
+Two methods. **Skeleton tracing (default)**: close small ink gaps → Zhang–
+Suen thinning → erase node discs → each remaining component is one edge
+(connect the two nodes it touches). Components touching ≥3 nodes emit
+*junction* diagnostics (candidate missed vertices); strokes touching one
+node emit *loose ends*. Near-perfect precision (0 crossing/nonplanar
+failures over 1,821 crops). **Corridor probe (fallback)**: stroke-following
+sampling along node-pair chords, coverage ≥ 0.80 + offset-smoothness gate.
+Also home of `infer_ring_size` and `degree_check`.
+
+### 6b. `src/extract.py` — full extraction + `src/evaluate.py` — measurement
+`extract_graph` = node detection + skeleton tracing + gap bridging (facing
+loose-end pairs become direct edges), plus sensor-fusion vertex *recovery*
+(skeleton anomalies confirmed by a weak node detector) and a corridor edge
+mode — both only sane inside `batch_detect`'s **validator-guarded attempt
+ladder**: plain extraction first, riskier variants only accepted when they
+turn a battery failure into a pass (monotone by construction; ladder-passed
+crops carry "verify in HITL" notes). `evaluate.py` compares two batch runs
+(pass rates, failure histograms, fixed/broken lists) and scores the
+hand-verified golden set (`data/golden.json`) for precision — never trust a
+detector change on one instrument alone.
 
 ### 7. `src/batch_detect.py` — the batch runner
 `python -m src.batch_detect --crops data/crops --out data/detections.json
@@ -150,8 +164,11 @@ Superseded by batch_detect + the battery; kept for provenance.
 
 ## Current state & scoreboard
 
-20 tests green (`python -m pytest tests/`). Honest baseline: **29/1,821**
-crops pass the full battery (`data/detections_v2.json`); dominant failure
-is edge detection (1,069 disconnected). Hardening plan and day-by-day
-sprint context: `CLAUDE.md` here, `claude/cv-hardening-plan.md` in the
-Claude project.
+20 tests green (`python -m pytest tests/`). Day-2 scoreboard
+(`data/detections_day2_pm.json`): **81/1,821** pass the full battery via
+the guarded ladder (June baseline 29 — and those included phantom-built
+graphs; honest skeleton-only is 50). Phantom failure classes at zero; the
+bulk of remaining failures is node-detection recall on disconnected crops
+— HITL passes with the junction/loose-end pointers are the intended next
+push, alongside figure-class signatures. Hardening plan: `CLAUDE.md` here,
+`claude/cv-hardening-plan.md` in the Claude project.

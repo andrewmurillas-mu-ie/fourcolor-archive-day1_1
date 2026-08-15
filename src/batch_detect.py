@@ -27,11 +27,12 @@ import json
 import sys
 import time
 import os
+from functools import partial
+from multiprocessing import Pool
 from dataclasses import asdict
 from pathlib import Path
 
-from src.node_detector import detect_nodes
-from src.edge_detector import detect_edges
+from src.extract import extract_graph
 from src.validator import validate_detection, RING_MIN, RING_MAX
 
 from dotenv import load_dotenv
@@ -44,11 +45,9 @@ def page_number(p: Path) -> int:
     return int(p.stem.split("_")[0].replace("page", ""))
 
 
-def run_crop(crop_path: Path, labeled_ring: int | None = None) -> dict:
-    """Detect nodes+edges in one crop and validate; returns the detection
-    dict (nodes, edges, implied ring, failures/warnings, euler_valid)."""
-    nodes = detect_nodes(str(crop_path))
-    edges = detect_edges(str(crop_path), nodes)
+def _build_result(crop_path: Path, nodes, edges, leftover_junctions,
+                  labeled_ring):
+    """Assemble + validate the detection dict for one extraction attempt."""
 
     result: dict = {
         "crop": crop_path.name,
@@ -74,6 +73,10 @@ def run_crop(crop_path: Path, labeled_ring: int | None = None) -> dict:
     rep = validate_detection(result, labeled_ring=labeled_ring)
     result["failures"] = rep.failures
     result["warnings"] = rep.warnings
+    for j in leftover_junctions:
+        result["warnings"] = result["warnings"] + [
+            f"UNRESOLVED_JUNCTION: strokes meet at {j['at']} touching "
+            f"nodes {j['nodes']} — inspect in HITL"]
     result["euler_valid"] = rep.ok
     implied_r = rep.computed.get("implied_ring")
     result["ring_size"] = implied_r
@@ -91,6 +94,56 @@ def run_crop(crop_path: Path, labeled_ring: int | None = None) -> dict:
     return result
 
 
+def run_crop(crop_path: Path, labeled_ring: int | None = None) -> dict:
+    """Extract and validate one crop, with VALIDATOR-GUARDED node recovery.
+
+    Recovery (sensor-fusion vertex recovery in src/extract.py) helps some
+    crops and hurts others; accepted blindly it measured net-negative
+    (50 -> 43 battery passes).  So: run WITHOUT recovery first; only if the
+    battery fails, retry WITH recovery and keep that version only if the
+    battery then passes.  By construction this can only add passes, never
+    break one.
+    """
+    nodes, edges, lj = extract_graph(str(crop_path), recover=False)
+    base = _build_result(crop_path, nodes, edges, lj, labeled_ring)
+    if base["euler_valid"] or not base["nodes"]:
+        return base
+    attempts = [
+        {"recover": True, "edge_method": "skeleton",
+         "note": "recovered vertices; verify in HITL"},
+        {"recover": False, "edge_method": "corridor",
+         "note": "corridor edges; verify in HITL"},
+        {"recover": True, "edge_method": "corridor",
+         "note": "recovered vertices + corridor edges; verify in HITL"},
+    ]
+    for att in attempts:
+        note = att.pop("note")
+        nodes, edges, lj = extract_graph(str(crop_path), **att)
+        cand = _build_result(crop_path, nodes, edges, lj, labeled_ring)
+        if cand["euler_valid"]:
+            cand["validation_note"] += f" ({note})"
+            return cand
+    return base
+
+
+def _run_safe(crop_path: Path, labeled_ring: int | None) -> dict:
+    """run_crop with the error trap (workers must never crash the pool)."""
+    try:
+        return run_crop(crop_path, labeled_ring)
+    except Exception as exc:
+        return {"crop": crop_path.name, "page": page_number(crop_path),
+                "nodes": [], "node_count": 0, "edges": [], "edge_count": 0,
+                "ring_size": None, "labeled_ring": None,
+                "e_attachment": None, "euler_valid": False,
+                "validation_note": f"error: {exc}",
+                "failures": [f"ERROR: {exc}"], "warnings": []}
+
+
+def _run_star(crop_path: Path, ring_labels: dict) -> dict:
+    """Picklable worker entry."""
+    return _run_safe(crop_path, ring_labels.get(crop_path.name))
+
+
 def main() -> None:
     """CLI: run the full detect+validate pipeline over a crops directory and
     write detections JSON with an honest per-failure-type summary."""
@@ -102,6 +155,9 @@ def main() -> None:
                         help="First page index to process (default: 14)")
     parser.add_argument("--out", type=Path, default=os.getenv("DEFAULT_OUT"),
                         help=f"Output JSON path (default: {os.getenv('DEFAULT_OUT')})")
+    parser.add_argument("--workers", type=int,
+                        default=max(1, (os.cpu_count() or 2) - 1),
+                        help="parallel workers (default: CPUs-1)")
     parser.add_argument("--ring-labels", type=Path, default=None,
                         help="JSON mapping crop filename -> labeled ring size "
                              "(independent ground truth, e.g. from caption "
@@ -130,34 +186,32 @@ def main() -> None:
     t0 = time.time()
     errors = 0
 
-    for i, crop_path in enumerate(crops, 1):
-        try:
-            results.append(
-                run_crop(crop_path, ring_labels.get(crop_path.name)))
-        except Exception as exc:
-            errors += 1
-            results.append({
-                "crop": crop_path.name,
-                "page": page_number(crop_path),
-                "nodes": [], "node_count": 0,
-                "edges": [], "edge_count": 0,
-                "ring_size": None, "labeled_ring": None,
-                "e_attachment": None,
-                "euler_valid": False,
-                "validation_note": f"error: {exc}",
-                "failures": [f"ERROR: {exc}"],
-                "warnings": [],
-            })
+    def _safe(crop_path: Path) -> dict:
+        return _run_safe(crop_path, ring_labels.get(crop_path.name))
 
-        if i % 100 == 0 or i == len(crops):
-            elapsed = time.time() - t0
-            rate = i / elapsed
-            remaining = (len(crops) - i) / rate if rate > 0 else 0
-            valid_so_far = sum(1 for r in results if r.get("euler_valid"))
-            print(f"  {i}/{len(crops)}  ({rate:.1f} crops/s, "
-                  f"~{remaining:.0f}s remaining)"
-                  f"  valid so far: {valid_so_far}/{i} "
-                  f"({100 * valid_so_far / i:.1f}%)")
+    if args.workers > 1:
+        with Pool(args.workers) as pool:
+            it = pool.imap(partial(_run_star, ring_labels=ring_labels),
+                           crops, chunksize=8)
+            for i, res in enumerate(it, 1):
+                results.append(res)
+                if i % 200 == 0 or i == len(crops):
+                    elapsed = time.time() - t0
+                    valid_so_far = sum(1 for r in results
+                                       if r.get("euler_valid"))
+                    print(f"  {i}/{len(crops)}  ({i/elapsed:.1f} crops/s)"
+                          f"  valid so far: {valid_so_far}/{i}")
+    else:
+        for i, crop_path in enumerate(crops, 1):
+            results.append(_safe(crop_path))
+            if i % 100 == 0 or i == len(crops):
+                elapsed = time.time() - t0
+                valid_so_far = sum(1 for r in results
+                                   if r.get("euler_valid"))
+                print(f"  {i}/{len(crops)}  ({i/elapsed:.1f} crops/s)"
+                      f"  valid so far: {valid_so_far}/{i}")
+    errors = sum(1 for r in results
+                 if any(f.startswith("ERROR") for f in r.get("failures", [])))
 
     args.out.parent.mkdir(parents=True, exist_ok=True)
     args.out.write_text(json.dumps(results, indent=2))

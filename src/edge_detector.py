@@ -26,10 +26,20 @@ from src.node_detector import Node, detect_nodes, load_binary
 # Constants
 # ---------------------------------------------------------------------------
 
-EDGE_INK_THRESHOLD = 0.40   # min ink fraction along the probe segment
+EDGE_INK_THRESHOLD = 0.80   # min covered fraction along the probe.  0.40
+                            # suited the straight-line probe (gaps from
+                            # stroke wobble); the stroke-following corridor
+                            # absorbs wobble, so real edges should be
+                            # near-fully covered — demand it.
 EDGE_MAX_DIST_PX   = 210    # ignore node pairs farther apart than this
 RING_MIN           = 3      # Appel–Haken ring sizes span roughly [3, 14]
 RING_MAX           = 14
+
+#: Corridor half-width (px at 600 DPI).  The diagrams are hand-drawn, so
+#: strokes bow away from the straight chord between node centres; a sample
+#: point counts as ink if ANY pixel within this perpendicular window is ink.
+#: 0 reproduces the original straight-line probe exactly.
+CORRIDOR_HALF_WIDTH = 4
 
 
 # ---------------------------------------------------------------------------
@@ -57,9 +67,42 @@ def _probe_line(
         return 0.0
     n = max(int(length * (t1 - t0)), 4)
     ts = np.linspace(t0, t1, n)
-    xs = np.clip((x1 + ts * dx).astype(int), 0, binary_inv.shape[1] - 1)
-    ys = np.clip((y1 + ts * dy).astype(int), 0, binary_inv.shape[0] - 1)
-    return float((binary_inv[ys, xs] > 128).sum()) / n
+    xs = x1 + ts * dx
+    ys = y1 + ts * dy
+    if CORRIDOR_HALF_WIDTH <= 0:
+        xi = np.clip(xs.astype(int), 0, binary_inv.shape[1] - 1)
+        yi = np.clip(ys.astype(int), 0, binary_inv.shape[0] - 1)
+        return float((binary_inv[yi, xi] > 128).sum()) / n
+
+    # Stroke-following corridor probe.  Hand-drawn edges bow away from the
+    # straight chord, so at each sample we record the perpendicular OFFSET
+    # of the nearest ink (widening the window for longer chords, whose bows
+    # are larger).  A real edge yields near-complete coverage AND a smooth
+    # offset sequence (we are following one stroke); a parallel nearby
+    # stroke yields partial coverage or offset jumps.  Returning plain
+    # "any-ink" coverage here caused a phantom-edge explosion (measured:
+    # GEOM_EDGE_CROSSING 6,341 -> 44,058) — do not simplify this back.
+    half_w = min(12, max(CORRIDOR_HALF_WIDTH, int(0.06 * length)))
+    px, py = -dy / length, dx / length
+    offsets = np.full(n, np.nan)
+    for off in sorted(range(-half_w, half_w + 1), key=abs):
+        xi = np.clip((xs + off * px).astype(int), 0, binary_inv.shape[1] - 1)
+        yi = np.clip((ys + off * py).astype(int), 0, binary_inv.shape[0] - 1)
+        ink = binary_inv[yi, xi] > 128
+        offsets = np.where(np.isnan(offsets) & ink, float(off), offsets)
+
+    covered = ~np.isnan(offsets)
+    coverage = float(covered.sum()) / n
+    if coverage < 1e-9:
+        return 0.0
+    # smoothness: successive offset jumps > 2 px mean we hopped strokes
+    seq = offsets[covered]
+    if len(seq) >= 2:
+        jumps = np.abs(np.diff(seq))
+        rough = float((jumps > 2.0).sum()) / len(jumps)
+        if rough > 0.05:
+            return 0.0
+    return coverage
 
 
 # ---------------------------------------------------------------------------
@@ -104,17 +147,160 @@ def _occluded_by_node(
 
 
 # ---------------------------------------------------------------------------
+# Skeleton tracing (the topological method)
+# ---------------------------------------------------------------------------
+
+#: Morphological close kernel before thinning — bridges small print breaks
+#: in old ink so an edge with a hairline gap still yields one stroke.
+SKEL_CLOSE_KERNEL = 5
+#: A stroke component "touches" a node if any of its pixels lies within
+#: node.radius + SKEL_TOUCH_PAD of the node centre.
+SKEL_TOUCH_PAD = 8
+#: Ignore stroke components smaller than this (specks, label remnants).
+SKEL_MIN_PIXELS = 6
+
+
+def detect_edges_skeleton(image_path: str, nodes: list[Node]
+                          ) -> tuple[list[tuple[int, int]], list[dict]]:
+    """Detect edges by tracing the ink skeleton instead of probing chords.
+
+    Method: close small gaps -> Zhang-Suen thinning (1-px strokes) ->
+    erase each node's disc -> connected components of what remains.  In a
+    clean drawing every edge meets others only AT vertices, so after disc
+    removal each component is exactly one edge: connect the two nodes it
+    touches.
+
+    Components touching MORE than two nodes are junction anomalies — in a
+    planar hand drawing they usually mean a vertex the node detector missed
+    (strokes meet where no node was found) — and are returned as
+    diagnostics rather than edges, with the skeleton branch point as a
+    candidate node location.  Components touching fewer than two nodes are
+    stray ink and ignored.
+
+    Returns (edges, diagnostics): edges as sorted (i, j) with i < j;
+    diagnostics as dicts {"kind": "junction", "nodes": [...], "at": (x, y)}.
+    """
+    _, binary_inv = load_binary(image_path)
+
+    k = cv2.getStructuringElement(cv2.MORPH_ELLIPSE,
+                                  (SKEL_CLOSE_KERNEL, SKEL_CLOSE_KERNEL))
+    closed = cv2.morphologyEx(binary_inv, cv2.MORPH_CLOSE, k)
+    skeleton = cv2.ximgproc.thinning(closed)
+
+    # erase node discs so strokes separate into per-edge components
+    mask = skeleton.copy()
+    for n in nodes:
+        cv2.circle(mask, (n.x, n.y), n.radius + 4, 0, -1)
+
+    n_comp, labels = cv2.connectedComponents((mask > 0).astype(np.uint8),
+                                             connectivity=8)
+    edges: set[tuple[int, int]] = set()
+    diagnostics: list[dict] = []
+
+    for comp in range(1, n_comp):
+        ys, xs = np.nonzero(labels == comp)
+        if len(xs) < SKEL_MIN_PIXELS:
+            continue
+        touching = []
+        for idx, n in enumerate(nodes):
+            reach = n.radius + SKEL_TOUCH_PAD
+            d2 = (xs - n.x) ** 2 + (ys - n.y) ** 2
+            if d2.min() <= reach * reach:
+                touching.append(idx)
+        if len(touching) == 2:
+            i, j = sorted(touching)
+            edges.add((i, j))
+        elif len(touching) > 2:
+            # candidate missed vertices = TRUE branch points of the stroke.
+            # A naive 3x3 neighbour count fires all along diagonal
+            # "staircase" pixels of the skeleton (measured: junction
+            # markers sprayed along entire edges); the crossing-number
+            # method counts 0->1 transitions around the 8-neighbourhood
+            # circle and only fires where >= 3 distinct strokes meet.
+            comp_mask = labels == comp
+            pts = [(int(c), int(r)) for r, c in
+                   np.argwhere(comp_mask) if _crossing_number(
+                       comp_mask, int(r), int(c)) >= 3]
+            pts = pts or [(int(xs.mean()), int(ys.mean()))]
+            for at in _cluster_points(pts, 12):
+                diagnostics.append(
+                    {"kind": "junction", "nodes": touching, "at": at})
+        elif len(touching) == 1:
+            # stroke reaching only one node: its far end marks where the
+            # other endpoint SHOULD be — often a vertex detection missed
+            n = nodes[touching[0]]
+            d2 = (xs - n.x) ** 2 + (ys - n.y) ** 2
+            far = int(np.argmax(d2))
+            if d2[far] >= (n.radius + SKEL_TOUCH_PAD + 12) ** 2:
+                diagnostics.append({"kind": "loose_end",
+                                    "nodes": touching,
+                                    "at": (int(xs[far]), int(ys[far]))})
+
+    return sorted(edges), diagnostics
+
+
+#: circular order of the 8-neighbourhood for the crossing-number test
+_RING8 = [(-1, -1), (-1, 0), (-1, 1), (0, 1),
+          (1, 1), (1, 0), (1, -1), (0, -1)]
+
+
+def _crossing_number(mask: np.ndarray, r: int, c: int) -> int:
+    """Number of 0->1 transitions walking the 8-neighbourhood circle.
+
+    1 = stroke endpoint, 2 = interior of a stroke, >= 3 = true branch
+    point.  Robust to the diagonal staircase artefacts that break naive
+    neighbour counting on thinned skeletons.
+    """
+    h, w = mask.shape
+    vals = []
+    for dr, dc in _RING8:
+        rr, cc = r + dr, c + dc
+        vals.append(bool(mask[rr, cc]) if 0 <= rr < h and 0 <= cc < w
+                    else False)
+    return sum(1 for k in range(8)
+               if not vals[k] and vals[(k + 1) % 8])
+
+
+def _cluster_points(pts: list[tuple[int, int]], radius: float
+                    ) -> list[tuple[int, int]]:
+    """Greedy centroid clustering of 2-D points within `radius`."""
+    clusters: list[list[tuple[int, int]]] = []
+    for p in pts:
+        for cl in clusters:
+            cx = sum(q[0] for q in cl) / len(cl)
+            cy = sum(q[1] for q in cl) / len(cl)
+            if (p[0] - cx) ** 2 + (p[1] - cy) ** 2 <= radius ** 2:
+                cl.append(p)
+                break
+        else:
+            clusters.append([p])
+    return [(int(sum(q[0] for q in cl) / len(cl)),
+             int(sum(q[1] for q in cl) / len(cl))) for cl in clusters]
+
+
+# ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
 
-def detect_edges(image_path: str, nodes: list[Node]) -> list[tuple[int, int]]:
-    """Detect internal edges between nodes via the line-probe method.
+def detect_edges(image_path: str, nodes: list[Node],
+                 method: str = "skeleton") -> list[tuple[int, int]]:
+    """Detect internal edges between nodes.
+
+    method="skeleton" (default): trace the thinned ink topology — robust to
+    hand-drawn curvature; junction anomalies are dropped (fetch them via
+    detect_edges_skeleton for diagnostics).
+    method="corridor": stroke-following corridor probe along node-pair
+    chords (the pre-skeleton fallback; also used by the HITL UI's local
+    re-probe).
 
     Returns a sorted list of (i, j) pairs with i < j.
     """
-    _, binary_inv = load_binary(image_path)
-    edges: list[tuple[int, int]] = []
+    if method == "skeleton":
+        edges, _ = detect_edges_skeleton(image_path, nodes)
+        return edges
 
+    _, binary_inv = load_binary(image_path)
+    edges_list: list[tuple[int, int]] = []
     for i in range(len(nodes)):
         for j in range(i + 1, len(nodes)):
             a, b = nodes[i], nodes[j]
@@ -128,9 +314,9 @@ def detect_edges(image_path: str, nodes: list[Node]) -> list[tuple[int, int]]:
             if _occluded_by_node(a.x, a.y, b.x, b.y, nodes, i, j, skip_a, skip_b):
                 continue
             if _probe_line(binary_inv, a.x, a.y, b.x, b.y, skip_a, skip_b) >= EDGE_INK_THRESHOLD:
-                edges.append((i, j))
+                edges_list.append((i, j))
 
-    return edges
+    return edges_list
 
 
 def infer_ring_size(nodes: list[Node], edges: list[tuple[int, int]]) -> int | None:
