@@ -14,8 +14,7 @@ Controls
   A key                    enter Add-Edge mode (click two nodes to connect)
   Esc                      cancel Add-Edge mode
   + / -                    increase / decrease ring size  r
-  ] / [                    increase / decrease E_attachment
-  S key                    save to JSON  (validator must pass first)
+  S key                    save to JSON  (full battery must pass first)
   N / P keys               next / previous crop  (when launched on a directory)
 
 Usage
@@ -38,7 +37,7 @@ import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 import numpy as np
 from typing import Any
-from mpl_toolkits.axes_grid1.mpl_axes import Axes
+from matplotlib.axes import Axes
 
 try:  # package import (python -m src.hitl_ui, pdoc) or flat (python hitl_ui.py)
     from src.node_detector import Node, detect_nodes, load_binary, DEGREE_MAP
@@ -120,10 +119,11 @@ class HITLEditor:
     Layout: crop image with node/edge overlay (left), live validator panel
     (right), button bar (bottom).  Graph state lives in ``self.nodes`` (list
     of Node — list index IS the node id) and ``self.edges`` (set of (i, j)
-    with i < j).  Ring size ``self.r`` and ``self.e_attach`` are
-    user-adjustable because they are not derivable from the drawing alone;
-    the info panel re-runs ``Validator.check`` after every mutation and
-    ``_save`` refuses to write JSON until it passes.
+    with i < j).  Ring size ``self.r`` is the operator's input — the one
+    quantity not derivable from the drawing alone; the info panel re-runs
+    the FULL fail-fast battery after every mutation (same check as the
+    save gate) and shows ring_delta = implied − yours as the correction
+    hint (+1 per missed edge, −1 per phantom edge or circle-as-dot).
 
     ``_save`` writes the CANONICAL schema (src/configuration.py) gated on
     the full fail-fast battery, with the operator's ring size as the label —
@@ -170,7 +170,6 @@ class HITLEditor:
         self.pointers: list[dict] = pointers or []
         self.labeled_ring = labeled_ring
         self.r: int = labeled_ring if labeled_ring else 5  # user adjustable
-        self.e_attach: int = 0   # E_attachment count — user adjustable
 
         # ── UI state ────────────────────────────────────────────────────────
         self.mode: str = "normal"   # "normal" | "add_edge"
@@ -283,29 +282,29 @@ class HITLEditor:
         self.info_ax.set_facecolor("#2a2a3e")
         self.info_ax.axis("off")
 
-        result = _validator.check(
-            V          = len(self.nodes) + self.r,
-            E_internal = len(self.edges),
-            E_attachment = self.e_attach,
-            r          = self.r,
-        )
+        rep = self._battery_report()
+        implied = rep.computed.get("implied_ring", "—")
+        delta = rep.computed.get("ring_delta")
 
-        status_colour = "#2ecc71" if result.is_valid else "#e74c3c"
-        status_text   = "✓  PASS" if result.is_valid else "✗  FAIL"
+        status_colour = "#2ecc71" if rep.ok else "#e74c3c"
+        status_text   = "✓  PASS" if rep.ok else "✗  FAIL"
+        first_fail = (rep.failures[0].split(":")[0]
+                      if rep.failures else "")
 
         lines = [
             ("MODE",       self.mode.upper().replace("_", " "),  "#aaaaff"),
             ("",           "",                                    "white"),
             ("Nodes (V_int)", str(len(self.nodes)),              "#dddddd"),
-            ("Ring size r",   str(self.r),                       "#dddddd"),
-            ("V total",       str(len(self.nodes) + self.r),     "#dddddd"),
-            ("",           "",                                    "white"),
             ("E_internal", str(len(self.edges)),                 "#dddddd"),
-            ("E_attachment",  str(self.e_attach),                "#dddddd"),
-            ("E_total",    str(len(self.edges) + self.e_attach), "#dddddd"),
-            ("E_expected", str(result.E_expected),               "#dddddd"),
             ("",           "",                                    "white"),
-            (status_text,  "",                                    status_colour),
+            ("Ring r (yours)", str(self.r),                      "#dddddd"),
+            ("Ring (implied)", str(implied),
+             "#dddddd" if delta in (0, None) else "#f39c12"),
+            ("ring_delta",
+             "—" if delta is None else f"{delta:+}",
+             "#dddddd" if delta in (0, None) else "#f39c12"),
+            ("",           "",                                    "white"),
+            (status_text,  first_fail,                            status_colour),
         ]
 
         y = 0.96
@@ -343,7 +342,6 @@ class HITLEditor:
             "Click empty → add node",
             "A / Esc     → add/cancel edge",
             "+ / -       → ring size ±1",
-            "] / [       → E_attach  ±1",
             "S           → save JSON",
         ]
         for h in hints:
@@ -443,12 +441,6 @@ class HITLEditor:
         elif k == "-":
             self.r = max(3, self.r - 1)
             self.redraw()
-        elif k == "]":
-            self.e_attach += 1
-            self.redraw()
-        elif k == "[":
-            self.e_attach = max(0, self.e_attach - 1)
-            self.redraw()
         elif k == "n":
             self._advance(+1)
         elif k == "p":
@@ -490,19 +482,13 @@ class HITLEditor:
             self.edge_first = None
         self.redraw()
 
-    def _save(self):
-        """Write the corrected graph to ``out_dir/<crop>.json`` in the
-        CANONICAL schema (src/configuration.py) — only if the FULL fail-fast
-        battery passes with the operator-set ring size as the label (fail
-        flashes red and prints the failures; success flashes green).  The
-        operator's r doubles as a hand-verified ring label downstream."""
+    def _to_configuration(self):
+        """Current editor state as a canonical Configuration."""
         try:
             from src.configuration import Configuration, Vertex, Provenance
-            from src.validator import validate
         except ImportError:
             from configuration import Configuration, Vertex, Provenance
-            from validator import validate
-        cfg = Configuration(
+        return Configuration(
             id=self.image_path.stem,
             vertices=[Vertex(id=i, degree=n.degree, shape=n.shape,
                              pos=(float(n.x), float(n.y)), radius=n.radius)
@@ -513,7 +499,27 @@ class HITLEditor:
                                   extraction="cv+hitl",
                                   human_corrected=True),
         )
-        rep = validate(cfg)
+
+    def _battery_report(self):
+        """Full fail-fast battery on the current state — the ONE source of
+        truth for both the live panel and the save gate.  (History: the
+        panel briefly ran the legacy identity check with a manual
+        E_attachment counter while save ran the battery; they could
+        disagree.  Spotted in external review; do not reintroduce.)"""
+        try:
+            from src.validator import validate
+        except ImportError:
+            from validator import validate
+        return validate(self._to_configuration())
+
+    def _save(self):
+        """Write the corrected graph to ``out_dir/<crop>.json`` in the
+        CANONICAL schema (src/configuration.py) — only if the FULL fail-fast
+        battery passes with the operator-set ring size as the label (fail
+        flashes red and prints the failures; success flashes green).  The
+        operator's r doubles as a hand-verified ring label downstream."""
+        cfg = self._to_configuration()
+        rep = self._battery_report()
         if not rep.ok:
             print(f"[HITL] Cannot save — battery FAIL:\n{rep}")
             # Flash the info panel red briefly
