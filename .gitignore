@@ -9,3 +9,5 @@ commit_msg_*.txt
 !data/ring_labels.json
 !data/config_index.json
 !data/golden.json
+!data/dataset/
+!data/dataset/**

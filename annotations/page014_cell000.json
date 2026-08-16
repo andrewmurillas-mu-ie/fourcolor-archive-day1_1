@@ -1,0 +1,78 @@
+{
+  "id": "page014_cell000",
+  "vertices": [
+    {
+      "id": 0,
+      "degree": 5,
+      "shape": "solid_dot",
+      "pos": [
+        123.0,
+        42.0
+      ],
+      "radius": 17
+    },
+    {
+      "id": 1,
+      "degree": 5,
+      "shape": "solid_dot",
+      "pos": [
+        46.0,
+        146.0
+      ],
+      "radius": 19
+    },
+    {
+      "id": 2,
+      "degree": 5,
+      "shape": "solid_dot",
+      "pos": [
+        192.0,
+        146.0
+      ],
+      "radius": 18
+    },
+    {
+      "id": 3,
+      "degree": 5,
+      "shape": "solid_dot",
+      "pos": [
+        124.0,
+        223.0
+      ],
+      "radius": 14
+    }
+  ],
+  "edges": [
+    [
+      0,
+      1
+    ],
+    [
+      0,
+      2
+    ],
+    [
+      1,
+      2
+    ],
+    [
+      1,
+      3
+    ],
+    [
+      2,
+      3
+    ]
+  ],
+  "ring_size": 6,
+  "reducibility": null,
+  "provenance": {
+    "source_document": null,
+    "crop": "page014_cell000.png",
+    "figure_ref": null,
+    "extraction": "cv+hitl",
+    "human_corrected": true,
+    "notes": null
+  },
+  "schema_version": "1.1"
+}

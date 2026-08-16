@@ -29,6 +29,7 @@ Usage
 
 import argparse
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -124,20 +125,26 @@ class HITLEditor:
     the info panel re-runs ``Validator.check`` after every mutation and
     ``_save`` refuses to write JSON until it passes.
 
-    NOTE (schema debt): ``_save`` writes an ad-hoc annotation dict, not the
-    canonical schema in src/configuration.py — convert with
-    ``Configuration.from_detection`` downstream, or unify when the HITL
-    workflow is next touched.
+    ``_save`` writes the CANONICAL schema (src/configuration.py) gated on
+    the full fail-fast battery, with the operator's ring size as the label —
+    every saved annotation is simultaneously a hand-verified ring label.
 
     Constructor args:
         image_path:      crop PNG to edit.
         out_dir:         where corrected JSONs are written (one per crop).
         preloaded_nodes: skip auto-detection and start from these nodes
                          (used with --detections to resume batch output).
+        pointers:        "look here" markers from batch warnings
+                         (junction = green X, loose end = blue X).
+        labeled_ring:    known ring size (presets self.r).
+        preset_edges:    edges from the batch detection (skip re-probing).
     """
 
     def __init__(self, image_path: str, out_dir: str = "annotations",
-                 preloaded_nodes: list[Node] | None = None):
+                 preloaded_nodes: list[Node] | None = None,
+                 pointers: list[dict] | None = None,
+                 labeled_ring: int | None = None,
+                 preset_edges: set[tuple[int, int]] | None = None):
         self.image_path = Path(image_path)
         self.out_dir = Path(out_dir)
         self.out_dir.mkdir(parents=True, exist_ok=True)
@@ -156,8 +163,13 @@ class HITLEditor:
             preloaded_nodes if preloaded_nodes is not None
             else detect_nodes(str(self.image_path))
         )
-        self.edges: set[tuple[int, int]] = probe_all_edges(self.binary_inv, self.nodes)
-        self.r: int = 5          # ring size — user adjustable
+        self.edges: set[tuple[int, int]] = (
+            preset_edges if preset_edges is not None
+            else probe_all_edges(self.binary_inv, self.nodes))
+        #: "look here" markers from the batch pipeline (junctions/loose ends)
+        self.pointers: list[dict] = pointers or []
+        self.labeled_ring = labeled_ring
+        self.r: int = labeled_ring if labeled_ring else 5  # user adjustable
         self.e_attach: int = 0   # E_attachment count — user adjustable
 
         # ── UI state ────────────────────────────────────────────────────────
@@ -246,6 +258,14 @@ class HITLEditor:
             self.ax.text(n.x, n.y - ring_r - 5, str(n.degree),
                          color=c, fontsize=7, ha="center", va="bottom",
                          fontweight="bold", zorder=4)
+
+        # Pipeline pointers: where the batch pipeline suspects a missed
+        # vertex (junction = green X, loose end = blue X)
+        for ptr in self.pointers:
+            px, py = ptr["at"]
+            colour = "#00ff66" if ptr.get("kind") == "junction" else "#66aaff"
+            self.ax.plot(px, py, marker="x", color=colour, markersize=14,
+                         markeredgewidth=3, zorder=5)
 
         # Title
         self.ax.set_title(
@@ -471,17 +491,31 @@ class HITLEditor:
         self.redraw()
 
     def _save(self):
-        """Write the corrected graph to ``out_dir/<crop>.json`` — only if the
-        identity check passes with the operator-supplied r and E_attachment
-        (fail flashes the panel red; success flashes green)."""
-        result = _validator.check(
-            V            = len(self.nodes) + self.r,
-            E_internal   = len(self.edges),
-            E_attachment = self.e_attach,
-            r            = self.r,
+        """Write the corrected graph to ``out_dir/<crop>.json`` in the
+        CANONICAL schema (src/configuration.py) — only if the FULL fail-fast
+        battery passes with the operator-set ring size as the label (fail
+        flashes red and prints the failures; success flashes green).  The
+        operator's r doubles as a hand-verified ring label downstream."""
+        try:
+            from src.configuration import Configuration, Vertex, Provenance
+            from src.validator import validate
+        except ImportError:
+            from configuration import Configuration, Vertex, Provenance
+            from validator import validate
+        cfg = Configuration(
+            id=self.image_path.stem,
+            vertices=[Vertex(id=i, degree=n.degree, shape=n.shape,
+                             pos=(float(n.x), float(n.y)), radius=n.radius)
+                      for i, n in enumerate(self.nodes)],
+            edges=sorted(self.edges),
+            ring_size=self.r,
+            provenance=Provenance(crop=self.image_path.name,
+                                  extraction="cv+hitl",
+                                  human_corrected=True),
         )
-        if not result.is_valid:
-            print(f"[HITL] Cannot save — validator FAIL: {result}")
+        rep = validate(cfg)
+        if not rep.ok:
+            print(f"[HITL] Cannot save — battery FAIL:\n{rep}")
             # Flash the info panel red briefly
             self.info_ax.set_facecolor("#3a1a1a")
             self.fig.canvas.draw_idle()
@@ -493,29 +527,9 @@ class HITLEditor:
             threading.Thread(target=_reset, daemon=True).start()
             return
 
-        stem = self.image_path.stem
-        out_path = self.out_dir / f"{stem}.json"
-
-        payload = {
-            "source_crop": str(self.image_path),
-            "ring_size":   self.r,
-            "V_interior":  len(self.nodes),
-            "V_total":     len(self.nodes) + self.r,
-            "E_internal":  len(self.edges),
-            "E_attachment": self.e_attach,
-            "euler_valid": True,
-            "nodes": [
-                {"id": i, "shape": n.shape, "degree": n.degree,
-                 "x": n.x, "y": n.y}
-                for i, n in enumerate(self.nodes)
-            ],
-            "edges": [
-                {"from": i, "to": j} for i, j in sorted(self.edges)
-            ],
-        }
-
+        out_path = self.out_dir / f"{self.image_path.stem}.json"
         with open(out_path, "w") as f:
-            json.dump(payload, f, indent=2)
+            f.write(cfg.to_json())
 
         print(f"[HITL] Saved → {out_path}")
         self.info_ax.set_facecolor("#1a3a1a")
@@ -539,10 +553,37 @@ class HITLEditor:
 # Entry point
 # ──────────────────────────────────────────────────────────────────────────────
 
+POINTER_RE = re.compile(r"at \((\d+), (\d+)\)")
+
+
+def _priority(entry: dict) -> tuple:
+    """HITL queue order: ladder-passed 'verify in HITL' first (fast
+    confirms), then failing crops by ascending failure count (single-defect
+    crops are quick wins), wrecks last; clean passes excluded upstream."""
+    note = entry.get("validation_note", "")
+    if entry.get("euler_valid") and "verify in HITL" in note:
+        return (0, 0)
+    return (1, len(entry.get("failures", [])))
+
+
+def _pointers_from(entry: dict) -> list[dict]:
+    """Recover 'look here' coordinates from batch warning strings."""
+    out = []
+    for w in entry.get("warnings", []):
+        if "UNRESOLVED_JUNCTION" in w:
+            m = POINTER_RE.search(w)
+            if m:
+                out.append({"kind": "junction",
+                            "at": (int(m.group(1)), int(m.group(2)))})
+    return out
+
+
 def main():
     """CLI: open the editor on one crop or browse a directory (N/P keys).
-    --detections pre-populates nodes from batch output in JSON order;
-    --skip-empty then skips crops where detection found nothing."""
+    --detections pre-populates nodes AND edges from batch output;
+    --queue orders crops by triage priority (HITL-verify confirms first,
+    then fewest-failures) and skips clean passes;
+    --skip-empty skips crops where detection found nothing."""
     parser = argparse.ArgumentParser(description="HITL correction UI for Appel-Haken configurations")
     parser.add_argument("path", help="Path to a single crop PNG or a directory of PNGs")
     parser.add_argument("--out", default="annotations", help="Output directory for JSON files")
@@ -550,18 +591,36 @@ def main():
                         help="detections_part.json from batch_detect.py — pre-populates nodes")
     parser.add_argument("--skip-empty", action="store_true",
                         help="Skip crops with zero detected nodes (only with --detections)")
+    parser.add_argument("--queue", action="store_true",
+                        help="Triage order from --detections (verify-notes "
+                             "first, then fewest failures); skips clean passes")
+    parser.add_argument("--ring-labels", type=Path, default=Path("data/ring_labels.json"),
+                        help="Hand-verified ring labels (presets r where known)")
     args = parser.parse_args()
 
     # Load pre-computed detections if provided
     detections: dict[str, list[Node]] = {}
-    detection_order: list[str] = []   # crop filenames in JSON order
+    det_edges: dict[str, set] = {}
+    det_pointers: dict[str, list[dict]] = {}
+    detection_order: list[str] = []   # crop filenames in JSON (or queue) order
+    ring_labels: dict[str, int] = {}
+    if args.ring_labels and Path(args.ring_labels).exists():
+        ring_labels = json.loads(Path(args.ring_labels).read_text())
     if args.detections:
         raw = json.loads(args.detections.read_text())
+        if args.queue:
+            raw = [e for e in raw
+                   if not (e.get("euler_valid")
+                           and "verify in HITL" not in e.get("validation_note", ""))]
+            raw.sort(key=_priority)
         for entry in raw:
             if args.skip_empty and entry["node_count"] == 0:
                 continue
             nodes = [Node(**n) for n in entry["nodes"]]
             detections[entry["crop"]] = nodes
+            det_edges[entry["crop"]] = {(e["from"], e["to"])
+                                        for e in entry.get("edges", [])}
+            det_pointers[entry["crop"]] = _pointers_from(entry)
             detection_order.append(entry["crop"])
 
     p = Path(args.path)
@@ -582,8 +641,13 @@ def main():
 
     idx = 0
     while 0 <= idx < len(images):
-        preloaded = detections.get(images[idx].name) if detections else None
-        editor = HITLEditor(str(images[idx]), out_dir=args.out, preloaded_nodes=preloaded)
+        name = images[idx].name
+        preloaded = detections.get(name) if detections else None
+        editor = HITLEditor(
+            str(images[idx]), out_dir=args.out, preloaded_nodes=preloaded,
+            pointers=det_pointers.get(name),
+            labeled_ring=ring_labels.get(name),
+            preset_edges=det_edges.get(name) if name in det_edges else None)
         direction = getattr(editor, "_next_direction", 0)
         idx += direction if direction != 0 else len(images)  # 0 = window closed normally → stop
 

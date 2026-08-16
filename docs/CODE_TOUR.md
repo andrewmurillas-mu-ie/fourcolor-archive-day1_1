@@ -128,14 +128,19 @@ writes detection dicts (nodes, edges, implied ring, failures, warnings),
 prints an honest per-failure-type summary. `euler_valid` now means "full
 battery passed", and `labeled_ring` enables the true identity cross-check.
 
-### 8. `src/hitl_ui.py` — the human-in-the-loop editor
-`python -m src.hitl_ui data/crops --detections data/detections_v2.json`.
-Matplotlib editor: click a node to cycle its shape, shift-click to delete,
-click an edge to remove it, click empty space to add a node, `A` to add an
-edge, `+/-` and `]/[` to adjust r and E_attachment, `S` saves (refuses
-until the identity passes), `N/P` to browse. **Schema debt:** its saved
-annotation JSON is ad-hoc, not the canonical schema — convert via
-`Configuration.from_detection`, or unify next time we touch the UI.
+### 8. `src/hitl_ui.py` — the editor + `src/collect_annotations.py`
+`python -m src.hitl_ui data/crops --detections data/detections_day2_pm.json
+--queue`. Triage-ordered browsing (ladder-passed "verify" confirms first,
+then fewest-failures), batch edges preloaded, pipeline pointers drawn as
+X marks (green junction / blue loose-end = "look here for a missed
+vertex"), ring label preset when known. Click a node to cycle its shape,
+shift-click to delete, click empty space to add a node, click an edge to
+remove it, `A` to add an edge, `+/-` for ring size, `S` saves, `N/P`
+browse. **Save is gated on the FULL battery** with the operator's r as the
+label, and writes the canonical schema — every annotation doubles as a
+hand-verified ring label. `collect_annotations` then re-validates all
+annotations, merges labels, builds `data/dataset/`, and prints census
+acceptance progress (complete when the ring histogram equals p. 504's).
 
 ### 9. `src/ring_labels.py` — the Table U index
 Maps every crop to its (figure, position) slot via a global 5×7 grid fitted
